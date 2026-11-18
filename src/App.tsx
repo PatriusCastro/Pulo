@@ -63,6 +63,7 @@ const ICONS = {
   activity: "M3 11h4.3L10 3.6l4 13.2 2.4-5.8H21v2h-3.3L14 21.4 10 8.2 8.7 13H3z",
   calculator: "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 3v4h10V5zm0 7v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2z",
   screenshot: "M7 3h2v4h8a2 2 0 0 1 2 2v8h3v2h-3v3h-2v-3H9a2 2 0 0 1-2-2V9H4V7h3zm2 6v8h8V9z",
+  clipboard: "M9 2h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2V3a1 1 0 0 1 1-1zm1 2v2h4V4zM8 10v2h8v-2zm0 4v2h6v-2z",
   folder: "M3 6a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
 };
 const DEVICE_ICON: Record<string, string> = { mouse: ICONS.mouse, keyboard: ICONS.keyboard, headphones: ICONS.headphones };
@@ -575,6 +576,7 @@ export default function App() {
         ["calculator", "Calculator", ICONS.calculator],
         ["screenshot", "Screenshot", ICONS.screenshot],
         ["explorer", "File Explorer", ICONS.folder],
+        ["clipboard", "Clipboard history", ICONS.clipboard],
       ])}
     </div>
   );

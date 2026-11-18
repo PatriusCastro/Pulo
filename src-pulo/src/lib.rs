@@ -39,13 +39,33 @@ fn px(v: f64, s: f64) -> i32 {
     (v * s).round() as i32
 }
 
-/// Clip the window to the pill's current size, centered horizontally, flush to the top.
+/// Clip the window to the pill's shape: rounded like the pill (radius as in island.css),
+/// centered, flush to the top. When open, add a circle per shortcut button (.side,
+/// .shortcut in island.css). Outside this shape the window doesn't exist, so clicks pass
+/// through, and if Windows ever drops the transparency there are no square corners left
+/// to turn white.
 fn apply_region(w: &WebviewWindow) {
+    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateEllipticRgn, CreateRoundRectRgn, DeleteObject, RGN_OR};
     let s = w.scale_factor().unwrap_or(1.0);
     let (rw, rh) = *REGION.lock().unwrap();
-    let x0 = (px(MAX.0, s) - px(rw, s)) / 2;
+    let open = rw > 420.0; // the expanded size includes the shortcut columns
+    let pill_w = if open { 420.0 } else { rw };
+    let radius = if rh <= 36.0 { rh / 2.0 } else { 30.0 };
+    let x0 = (px(MAX.0, s) - px(pill_w, s)) / 2;
     unsafe {
-        let rgn = CreateRectRgn(x0, 0, x0 + px(rw, s), px(rh, s));
+        // +1: GDI leaves out the right and bottom edges of round regions.
+        let rgn = CreateRoundRectRgn(x0, 0, x0 + px(pill_w, s) + 1, px(rh, s) + 1, px(radius * 2.0, s), px(radius * 2.0, s));
+        if open {
+            // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
+            for row in 0..4 {
+                let y = 6.0 + row as f64 * 48.0;
+                for x in [4.0, MAX.0 - 44.0] {
+                    let b = CreateEllipticRgn(px(x, s), px(y, s), px(x + 40.0, s) + 1, px(y + 40.0, s) + 1);
+                    CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
+                    let _ = DeleteObject(b.into());
+                }
+            }
+        }
         SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
     }
 }
@@ -90,6 +110,7 @@ fn launch(app: AppHandle, target: String) {
     let cmd = match target.as_str() {
         "settings" => return open_settings(&app),
         "mixer" => return sys::open_mixer(),
+        "clipboard" => return sys::open_clipboard(),
         "calculator" => "calc.exe",
         "screenshot" => "ms-screenclip:",
         "explorer" => "explorer.exe",

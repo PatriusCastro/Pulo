@@ -406,19 +406,33 @@ pub fn poll_notifications() {
     }
 }
 
-/// Open Windows 11's own per-app volume mixer (Quick Settings), via its Win+Ctrl+V shortcut.
-// ponytail: native mixer instead of an in-island one. Build WASAPI session sliders
-// (IAudioSessionManager2 + ISimpleAudioVolume) only if this flyout isn't enough.
-pub fn open_mixer() {
+/// Press a Windows shortcut: keys go down in order, then up in reverse.
+fn press(keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, ..Default::default() } },
     };
-    let seq = [key(VK_LWIN, false), key(VK_CONTROL, false), key(VK_V, false), key(VK_V, true), key(VK_CONTROL, true), key(VK_LWIN, true)];
+    let seq: Vec<INPUT> = keys.iter().map(|&k| key(k, false)).chain(keys.iter().rev().map(|&k| key(k, true))).collect();
     unsafe {
         SendInput(&seq, std::mem::size_of::<INPUT>() as i32);
     }
+}
+
+/// Open Windows 11's own per-app volume mixer (Quick Settings), via Win+Ctrl+V.
+// ponytail: native mixer instead of an in-island one. Build WASAPI session sliders
+// (IAudioSessionManager2 + ISimpleAudioVolume) only if this flyout isn't enough.
+pub fn open_mixer() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    press(&[VK_LWIN, VK_CONTROL, VK_V]);
+}
+
+/// Open Windows' clipboard history (Win+V). Picking an item pastes into the app you were
+/// in, since the island never takes focus.
+// ponytail: native history instead of Pulo's own clipboard store.
+pub fn open_clipboard() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    press(&[VK_LWIN, VK_V]);
 }
 
 /// True once there's been no keyboard or mouse input for 5 minutes.

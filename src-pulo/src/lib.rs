@@ -15,7 +15,7 @@ use tauri::{
 use windows::{
     core::{w, PCWSTR},
     Win32::{
-        Foundation::HWND,
+        Foundation::{HWND, RECT},
         Graphics::Gdi::{CreateRectRgn, SetWindowRgn},
         System::Registry::*,
         UI::{Shell::*, WindowsAndMessaging::*},
@@ -44,9 +44,8 @@ fn px(v: f64, s: f64) -> i32 {
 /// .shortcut in island.css). Outside this shape the window doesn't exist, so clicks pass
 /// through, and if Windows ever drops the transparency there are no square corners left
 /// to turn white.
-fn apply_region(w: &WebviewWindow) {
+fn apply_region(w: &WebviewWindow, s: f64) {
     use windows::Win32::Graphics::Gdi::{CombineRgn, CreateEllipticRgn, CreateRoundRectRgn, DeleteObject, RGN_OR};
-    let s = w.scale_factor().unwrap_or(1.0);
     let (rw, rh) = *REGION.lock().unwrap();
     let open = rw > 420.0; // the expanded size includes the shortcut columns
     let pill_w = if open { 420.0 } else { rw };
@@ -83,24 +82,58 @@ fn keep_transparent(w: &WebviewWindow) {
     }
 }
 
-/// Size and center the window on the primary monitor.
-fn place(w: &WebviewWindow) {
-    let Ok(Some(m)) = w.primary_monitor() else { return };
-    let s = m.scale_factor();
-    let (pw, ph) = (px(MAX.0, s), px(MAX.1, s));
-    let x = m.position().x + (m.size().width as i32 - pw) / 2;
-    let y = m.position().y + px(TOP_MARGIN, s);
+/// Where the island belongs: top center of the screen the mouse is on, sized for that
+/// screen's DPI. Returns the window rect (x, y, w, h) and the scale.
+fn target() -> (RECT, f64) {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
+    use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     unsafe {
-        let _ = SetWindowPos(hwnd(w), Some(HWND_TOPMOST), x, y, pw, ph, SWP_NOACTIVATE);
+        let mut c = Default::default();
+        let _ = GetCursorPos(&mut c);
+        let m = MonitorFromPoint(c, MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(m, &mut info);
+        let (mut dx, mut dy) = (96, 96);
+        let _ = GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        let s = dx as f64 / 96.0;
+        let r = info.rcMonitor;
+        let (pw, ph) = (px(MAX.0, s), px(MAX.1, s));
+        let x = r.left + (r.right - r.left - pw) / 2;
+        let y = r.top + px(TOP_MARGIN, s);
+        (RECT { left: x, top: y, right: x + pw, bottom: y + ph }, s)
     }
-    apply_region(w);
+}
+
+/// Move the window where it belongs, unless it's already there. Called every second, so
+/// the island follows the mouse between screens and survives monitor and DPI changes
+/// (moving to a screen with another DPI makes Windows rescale the window afterwards; the
+/// next call puts it right).
+fn place(w: &WebviewWindow) {
+    let (t, s) = target();
+    let mut cur = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(hwnd(w), &mut cur);
+        if cur == t {
+            return;
+        }
+        // Landing on a screen with another DPI makes tao rescale the window by the DPI ratio
+        // on top of our size (WM_DPICHANGED), so set it again once it has arrived.
+        for _ in 0..2 {
+            let _ = SetWindowPos(hwnd(w), Some(HWND_TOPMOST), t.left, t.top, t.right - t.left, t.bottom - t.top, SWP_NOACTIVATE);
+            let _ = GetWindowRect(hwnd(w), &mut cur);
+            if cur == t {
+                break;
+            }
+        }
+    }
+    apply_region(w, s);
     keep_transparent(w);
 }
 
 #[tauri::command]
 fn resize(window: WebviewWindow, w: f64, h: f64) {
     *REGION.lock().unwrap() = (w, h);
-    apply_region(&window);
+    apply_region(&window, window.scale_factor().unwrap_or(1.0));
     keep_transparent(&window);
 }
 
@@ -371,7 +404,6 @@ pub fn run() {
             thread::spawn(move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
                 let mut hidden = true; // window starts hidden; first tick shows it
-                let mut last_geo = None;
                 let mut away = false;
                 loop {
                     let fs = fullscreen_app_active();
@@ -382,16 +414,7 @@ pub fn run() {
                             let _ = ShowWindow(hwnd(&w), cmd);
                         }
                     }
-                    if !hidden {
-                        keep_transparent(&w); // backstop for causes other than clicks (sleep, display changes)
-                    }
-                    let geo = w.primary_monitor().ok().flatten().map(|m| {
-                        (m.position().x, m.position().y, m.size().width, m.size().height, m.scale_factor().to_bits())
-                    });
-                    if geo != last_geo {
-                        last_geo = geo;
-                        place(&w); // monitor plugged/unplugged, resolution or DPI change
-                    }
+                    place(&w); // follows the mouse between screens; no-op when already there
                     sys::poll_media();
                     sys::poll_notifications();
                     if sys::user_away() != away {

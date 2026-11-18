@@ -2,6 +2,7 @@ mod agents;
 mod devices;
 mod eq;
 mod sys;
+mod update;
 
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf, sync::Mutex, thread, time::Duration};
@@ -274,6 +275,7 @@ pub fn run() {
         }
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             resize,
             refresh_transparency,
@@ -309,14 +311,17 @@ pub fn run() {
             place(&w);
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let updates = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Pulo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings, &quit])?;
+            let menu = Menu::with_items(app, &[&settings, &updates, &quit])?;
+            update::start(app.handle().clone(), updates);
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("icon").clone())
                 .tooltip("Pulo")
                 .menu(&menu)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "settings" => open_settings(app),
+                    "update" => update::clicked(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })

@@ -19,12 +19,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 windows-core = "0.61" # needed by the #[implement] macro
 windows = { version = "0.61", features = [
   "Foundation",
   "Media_Control",
   "Storage_Streams",
   "Win32_Foundation",
+  "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_Media_Audio_Endpoints",
   "Win32_Security",
@@ -35,10 +37,13 @@ windows = { version = "0.61", features = [
   "Win32_System_Variant",
   "Win32_System_Power",
   "Win32_System_Registry",
+  "Win32_System_SystemInformation",
+  "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
   "Web_Http",
+  "Web_Http_Headers",
 ] }
 
 

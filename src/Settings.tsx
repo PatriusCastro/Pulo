@@ -8,9 +8,13 @@ export default function Settings() {
   const [status, setStatus] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [autostart, setAutostart] = useState(false);
+  const [lyrics, setLyrics] = useState(false);
 
   useEffect(() => {
-    invoke<{ calendar_url: string }>("get_settings").then((s) => setUrl(s.calendar_url));
+    invoke<{ calendar_url: string; lyrics: boolean }>("get_settings").then((s) => {
+      setUrl(s.calendar_url);
+      setLyrics(s.lyrics);
+    });
     invoke<boolean>("autostart_enabled").then(setAutostart);
   }, []);
 
@@ -72,6 +76,22 @@ export default function Settings() {
         />
         Start Pulo with Windows
       </label>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={lyrics}
+          aria-describedby="lyrics-help"
+          onChange={(e) => {
+            setLyrics(e.target.checked);
+            invoke("set_lyrics", { on: e.target.checked });
+          }}
+        />
+        Show synced lyrics
+      </label>
+      <p id="lyrics-help" className="help indent">
+        Looks up each song on lrclib.net, which receives the song's title, artist and length. Nothing else is sent.
+      </p>
     </main>
   );
 }

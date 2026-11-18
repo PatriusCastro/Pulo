@@ -25,6 +25,14 @@ pub struct Media {
     artist: String,
     playing: bool,
     art_rev: u32, // bumps when album art changes; UI then fetches it via `media_art`
+    duration_ms: i64,
+    position_ms: i64, // playback position as of `position_at`; the UI extrapolates while playing
+    position_at: i64, // ms since epoch
+}
+
+/// WinRT DateTime (100 ns ticks since 1601) -> ms since 1970.
+fn epoch_ms(t: windows::Foundation::DateTime) -> i64 {
+    (t.UniversalTime - 116_444_736_000_000_000) / 10_000
 }
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -84,10 +92,16 @@ pub fn poll_media() {
         let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
         let status = s.GetPlaybackInfo().ok()?.PlaybackStatus().ok()?;
         let playing = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
-        Some((p.Title().ok()?.to_string(), p.Artist().unwrap_or_default().to_string(), playing, p))
+        let tl = s.GetTimelineProperties().ok();
+        let ticks = |r: Result<windows::Foundation::TimeSpan>| r.map_or(0, |t| t.Duration / 10_000);
+        let timing = tl.map_or((0, 0, 0), |t| {
+            let start = ticks(t.StartTime());
+            (ticks(t.EndTime()) - start, ticks(t.Position()) - start, t.LastUpdatedTime().map_or(0, epoch_ms))
+        });
+        Some((p.Title().ok()?.to_string(), p.Artist().unwrap_or_default().to_string(), playing, p, timing))
     });
     let old = STATE.lock().unwrap().media.clone();
-    let new = cur.map(|(title, artist, playing, p)| {
+    let new = cur.map(|(title, artist, playing, p, (duration_ms, position_ms, position_at))| {
         let same_track = old.as_ref().is_some_and(|o| o.title == title && o.artist == artist);
         let mut art_rev = old.as_ref().map_or(0, |o| o.art_rev);
         // Players often publish the art a moment after the title, so retry while it's missing.
@@ -98,7 +112,7 @@ pub fn poll_media() {
                 art_rev += 1;
             }
         }
-        Media { title, artist, playing, art_rev }
+        Media { title, artist, playing, art_rev, duration_ms, position_ms, position_at }
     });
     if new != old {
         STATE.lock().unwrap().media = new;
@@ -156,19 +170,36 @@ const TEMP_EXTS: [&str; 6] = [".crdownload", ".part", ".partial", ".download", "
 // ponytail: files saved straight into Downloads without a rename (some apps' Save As) are
 // not reported. Add FILE_ACTION_ADDED + a size-settled check if that matters.
 pub fn watch_downloads() -> Result<()> {
-    use windows::{
-        core::HSTRING,
-        Win32::{Storage::FileSystem::*, UI::Shell::*},
-    };
+    use windows::Win32::{Storage::FileSystem::*, UI::Shell::*};
     let dir = unsafe {
         let p = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None)?;
         let s = p.to_string().unwrap_or_default();
         CoTaskMemFree(Some(p.0 as _));
         s
     };
+    watch_dir(&dir, false, FILE_NOTIFY_CHANGE_FILE_NAME, |batch| {
+        for (action, name) in batch {
+            let lower = name.to_lowercase();
+            if action == FILE_ACTION_RENAMED_NEW_NAME && !TEMP_EXTS.iter().any(|e| lower.ends_with(e)) && !name.starts_with('.') && !name.starts_with("~$") {
+                if let Some(app) = APP.get() {
+                    let _ = app.emit("download", format!(r"{dir}\{name}"));
+                }
+            }
+        }
+    })
+}
+
+/// Block forever, calling `f` with each batch of (action, path relative to `dir`) changes.
+pub fn watch_dir(
+    dir: &str,
+    recursive: bool,
+    filter: windows::Win32::Storage::FileSystem::FILE_NOTIFY_CHANGE,
+    mut f: impl FnMut(Vec<(windows::Win32::Storage::FileSystem::FILE_ACTION, String)>),
+) -> Result<()> {
+    use windows::{core::HSTRING, Win32::Storage::FileSystem::*};
     let h = unsafe {
         CreateFileW(
-            &HSTRING::from(&dir),
+            &HSTRING::from(dir),
             FILE_LIST_DIRECTORY.0,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             None,
@@ -181,25 +212,22 @@ pub fn watch_downloads() -> Result<()> {
     loop {
         let mut n = 0u32;
         unsafe {
-            ReadDirectoryChangesW(h, buf.as_mut_ptr() as _, (buf.len() * 4) as u32, false, FILE_NOTIFY_CHANGE_FILE_NAME, Some(&mut n), None, None)?;
+            ReadDirectoryChangesW(h, buf.as_mut_ptr() as _, (buf.len() * 4) as u32, recursive, filter, Some(&mut n), None, None)?;
         }
+        let mut batch = Vec::new();
         let mut off = 0usize;
         while n > 0 {
             let info = unsafe { &*((buf.as_ptr() as *const u8).add(off) as *const FILE_NOTIFY_INFORMATION) };
             let name = String::from_utf16_lossy(unsafe {
                 std::slice::from_raw_parts(info.FileName.as_ptr(), info.FileNameLength as usize / 2)
             });
-            let lower = name.to_lowercase();
-            if info.Action == FILE_ACTION_RENAMED_NEW_NAME && !TEMP_EXTS.iter().any(|e| lower.ends_with(e)) && !name.starts_with('.') && !name.starts_with("~$") {
-                if let Some(app) = APP.get() {
-                    let _ = app.emit("download", format!(r"{dir}\{name}"));
-                }
-            }
+            batch.push((info.Action, name));
             if info.NextEntryOffset == 0 {
                 break;
             }
             off += info.NextEntryOffset as usize;
         }
+        f(batch); // empty batch = buffer overflowed and changes were dropped
     }
 }
 
@@ -286,6 +314,42 @@ pub fn fetch_calendar(link: &str) -> std::result::Result<String, String> {
         }
     }
     Ok(text)
+}
+
+// ---------- lyrics (LRCLIB, opt-in) ----------
+
+/// Time-synced lyrics in LRC format from lrclib.net, or "" when it has none.
+/// Sends only the track's title, artist and length. Callers check the opt-in first.
+pub fn fetch_lyrics(artist: &str, title: &str, secs: i64) -> std::result::Result<String, String> {
+    use windows::{
+        core::{h, HSTRING},
+        Foundation::Uri,
+        Web::Http::HttpClient,
+    };
+    let get = || -> Result<String> {
+        let esc = |s: &str| Uri::EscapeComponent(&HSTRING::from(s)).map(|h| h.to_string());
+        let mut url = format!("https://lrclib.net/api/get?artist_name={}&track_name={}", esc(artist)?, esc(title)?);
+        if secs > 0 {
+            url += &format!("&duration={secs}");
+        }
+        let client = HttpClient::new()?;
+        let _ = client.DefaultRequestHeaders()?.UserAgent()?.TryParseAdd(h!("Pulo/0.1"));
+        Ok(client.GetStringAsync(&Uri::CreateUri(&HSTRING::from(url))?)?.get()?.to_string())
+    };
+    // A 404 (song not in the database) also lands here; both mean "no lyrics".
+    let body = get().map_err(|e| e.message())?;
+    let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    Ok(v["syncedLyrics"].as_str().unwrap_or_default().to_string())
+}
+
+/// True once there's been no keyboard or mouse input for 5 minutes.
+pub fn user_away() -> bool {
+    use windows::Win32::{
+        System::SystemInformation::GetTickCount,
+        UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO},
+    };
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    unsafe { GetLastInputInfo(&mut info).as_bool() && GetTickCount().wrapping_sub(info.dwTime) > 5 * 60_000 }
 }
 
 // ---------- brightness + battery (power setting notifications) ----------

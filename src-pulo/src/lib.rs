@@ -1,3 +1,5 @@
+mod agents;
+mod eq;
 mod sys;
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +24,7 @@ const TOP_MARGIN: f64 = 6.0;
 // The window is always the largest pill size and never resizes (resizing makes the web
 // content jump for a frame). Instead its window region, which is the only part that is
 // drawn and clickable, is set to the pill's current size. Clicks elsewhere pass through.
-const MAX: (f64, f64) = (420.0, 236.0); // must match .pill.open in island.css
+const MAX: (f64, f64) = (420.0, 268.0); // must match .pill.open in island.css
 static REGION: Mutex<(f64, f64)> = Mutex::new((200.0, 36.0));
 
 fn hwnd(w: &WebviewWindow) -> HWND {
@@ -44,6 +46,19 @@ fn apply_region(w: &WebviewWindow) {
     }
 }
 
+/// Transparency comes from DWM blur-behind with an empty region (how tao sets it up). tao
+/// never re-applies it, and window activation or display changes can drop it, which turns
+/// the pill's transparent corners white. Cheap and idempotent, so re-apply freely.
+fn keep_transparent(w: &WebviewWindow) {
+    use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND};
+    unsafe {
+        let empty = CreateRectRgn(0, 0, -1, -1);
+        let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: empty, fTransitionOnMaximized: false.into() };
+        let _ = DwmEnableBlurBehindWindow(hwnd(w), &bb);
+        let _ = windows::Win32::Graphics::Gdi::DeleteObject(empty.into());
+    }
+}
+
 /// Size and center the window on the primary monitor.
 fn place(w: &WebviewWindow) {
     let Ok(Some(m)) = w.primary_monitor() else { return };
@@ -55,12 +70,20 @@ fn place(w: &WebviewWindow) {
         let _ = SetWindowPos(hwnd(w), Some(HWND_TOPMOST), x, y, pw, ph, SWP_NOACTIVATE);
     }
     apply_region(w);
+    keep_transparent(w);
 }
 
 #[tauri::command]
 fn resize(window: WebviewWindow, w: f64, h: f64) {
     *REGION.lock().unwrap() = (w, h);
     apply_region(&window);
+    keep_transparent(&window);
+}
+
+/// Called by the UI after every click: clicking inside the webview drops the transparency.
+#[tauri::command]
+fn refresh_transparency(window: WebviewWindow) {
+    keep_transparent(&window);
 }
 
 #[tauri::command]
@@ -95,6 +118,33 @@ async fn open_path(path: String) {
 struct Settings {
     #[serde(default)]
     calendar_url: String,
+    #[serde(default)]
+    lyrics: bool, // opt-in: sends track title/artist/length to lrclib.net
+}
+
+fn save_settings(app: &AppHandle, s: &Settings) -> Result<(), String> {
+    let path = settings_file(app);
+    fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| e.to_string())?;
+    fs::write(&path, serde_json::to_vec_pretty(s).unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
+    let mut s = load_settings(&app);
+    s.lyrics = on;
+    save_settings(&app, &s)?;
+    use tauri::Emitter;
+    let _ = app.emit("lyrics_enabled", on);
+    Ok(())
+}
+
+/// Synced lyrics for a track, or "" if none. Refuses unless the user opted in.
+#[tauri::command]
+async fn lyrics(app: AppHandle, artist: String, title: String, secs: i64) -> Result<String, String> {
+    if !load_settings(&app).lyrics {
+        return Err("Lyrics are turned off in Settings.".into());
+    }
+    sys::fetch_lyrics(&artist, &title, secs)
 }
 
 fn settings_file(app: &AppHandle) -> PathBuf {
@@ -114,12 +164,21 @@ fn get_settings(app: AppHandle) -> Settings {
 #[tauri::command]
 async fn set_calendar(app: AppHandle, url: String) -> Result<String, String> {
     let text = sys::fetch_calendar(&url)?;
-    let path = settings_file(&app);
     let mut s = load_settings(&app);
     s.calendar_url = url.trim().to_string();
-    fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| e.to_string())?;
-    fs::write(&path, serde_json::to_vec_pretty(&s).unwrap_or_default()).map_err(|e| e.to_string())?;
+    save_settings(&app, &s)?;
     Ok(text)
+}
+
+/// The UI turns the equalizer on while the expanded panel shows a playing track.
+#[tauri::command]
+fn equalizer(on: bool) {
+    eq::ON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn agents() -> agents::Agents {
+    agents::AGENTS.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -180,6 +239,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             resize,
+            refresh_transparency,
             snapshot,
             media_art,
             media,
@@ -188,17 +248,23 @@ pub fn run() {
             get_settings,
             set_calendar,
             calendar,
+            agents,
+            equalizer,
+            set_lyrics,
+            lyrics,
             autostart_enabled,
             set_autostart
         ])
         .setup(|app| {
             let _ = sys::APP.set(app.handle().clone());
             let w = app.get_webview_window("main").expect("main window");
-            // Tool window: out of Alt+Tab and the taskbar.
+            // Tool window: out of Alt+Tab and the taskbar. No-activate: clicking the island
+            // never steals focus from the app you're in (and activation was what dropped the
+            // window's transparency, see keep_transparent).
             unsafe {
                 let h = hwnd(&w);
                 let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-                SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
+                SetWindowLongPtrW(h, GWL_EXSTYLE, ex | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0 as isize);
             }
             place(&w);
 
@@ -218,6 +284,8 @@ pub fn run() {
 
             sys::watch_power();
             thread::spawn(|| sys::watch_downloads());
+            thread::spawn(|| agents::watch());
+            thread::spawn(eq::run);
 
             // Calendar refresh every 10 minutes.
             let handle = app.handle().clone();
@@ -236,6 +304,7 @@ pub fn run() {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
                 let mut hidden = true; // window starts hidden; first tick shows it
                 let mut last_geo = None;
+                let mut away = false;
                 loop {
                     let fs = fullscreen_app_active();
                     if fs != hidden {
@@ -245,6 +314,9 @@ pub fn run() {
                             let _ = ShowWindow(hwnd(&w), cmd);
                         }
                     }
+                    if !hidden {
+                        keep_transparent(&w); // backstop for causes other than clicks (sleep, display changes)
+                    }
                     let geo = w.primary_monitor().ok().flatten().map(|m| {
                         (m.position().x, m.position().y, m.size().width, m.size().height, m.scale_factor().to_bits())
                     });
@@ -253,6 +325,11 @@ pub fn run() {
                         place(&w); // monitor plugged/unplugged, resolution or DPI change
                     }
                     sys::poll_media();
+                    if sys::user_away() != away {
+                        away = !away;
+                        use tauri::Emitter;
+                        let _ = w.emit("away", away); // the pet naps while you're away
+                    }
                     thread::sleep(Duration::from_secs(1));
                 }
             });

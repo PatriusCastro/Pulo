@@ -104,6 +104,14 @@ button:disabled {
   font-weight: 400;
 }
 
+.check + .check {
+  margin-top: 12px;
+}
+
+.help.indent {
+  margin: 4px 0 0 24px;
+}
+
 .check input {
   width: 16px;
   height: 16px;

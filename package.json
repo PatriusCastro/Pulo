@@ -11,7 +11,7 @@
     "start": "tauri dev",
     "exe": "tauri build --no-bundle",
     "exe:debug": "tauri build --debug --no-bundle",
-    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts"
+    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts && node --experimental-strip-types --no-warnings scripts/lyrics.check.ts"
   },
   "dependencies": {
     "react": "^19.1.0",

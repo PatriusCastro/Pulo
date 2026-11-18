@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { occurrences, parseIcs, type Raw } from "./ics";
+import { parseLrc, type Line } from "./lyrics";
+import { Equalizer, LyricLine, Pet, type Mood } from "./extras";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./island.css";
 
-type Media = { title: string; artist: string; playing: boolean; art_rev: number };
+type Media = {
+  title: string;
+  artist: string;
+  playing: boolean;
+  art_rev: number;
+  duration_ms: number;
+  position_ms: number;
+  position_at: number;
+};
 type Snapshot = { media: Media | null; battery: { percent: number; charging: boolean } | null };
-type Hud = { kind: "volume" | "brightness" | "power" | "timer" | "download"; level: number; flag: boolean; text?: string };
+type Agents = {
+  sessions: { agent: string; title: string; project: string; working: boolean; last: number }[];
+  tokens_today: number;
+};
+type Hud = { kind: "volume" | "brightness" | "power" | "timer" | "download" | "agent"; level: number; flag: boolean; text?: string };
 
 // Must match .pill / .pill.open in island.css.
 const COLLAPSED = { w: 200, h: 36 };
-const EXPANDED = { w: 420, h: 236 }; // also MAX in lib.rs
+const EXPANDED = { w: 420, h: 268 }; // also MAX in lib.rs
 const PRESETS = [1, 5, 15, 25];
 
 const ICONS = {
@@ -28,6 +42,7 @@ const ICONS = {
   timer:
     "M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
   shelf: "M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3z",
+  agent: "M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z",
   download: "M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z",
   close: "M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z",
 };
@@ -37,6 +52,11 @@ const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
     <path d={d} />
   </svg>
 );
+
+const fmtTokens = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+// A session still marked working after 10 quiet minutes was most likely closed mid-turn.
+const STALE_MS = 10 * 60_000;
 
 const fmt = (ms: number) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -87,7 +107,14 @@ export default function App() {
   const audio = useRef<AudioContext | null>(null);
   const [shelf, setShelf] = useState<string[]>(loadShelf);
   const [events, setEvents] = useState<Raw[]>([]);
+  const [agents, setAgents] = useState<Agents>({ sessions: [], tokens_today: 0 });
   const dragStart = useRef<{ x: number; y: number; path: string } | null>(null);
+  const [lyricsOn, setLyricsOn] = useState(false);
+  const [lyrics, setLyrics] = useState<Line[]>([]);
+  const lyricsCache = useRef(new Map<string, Line[]>());
+  const [away, setAway] = useState(false);
+  const [cheerUntil, setCheerUntil] = useState(0);
+  const cheer = () => setCheerUntil(Date.now() + 12_000);
 
   // Newest first, no duplicates, kept across restarts.
   const addToShelf = (paths: string[]) =>
@@ -104,6 +131,8 @@ export default function App() {
   useEffect(() => {
     invoke<Snapshot>("snapshot").then(setSnap);
     invoke<string>("calendar").then((t) => setEvents(parseIcs(t)));
+    invoke<Agents>("agents").then(setAgents);
+    invoke<{ lyrics: boolean }>("get_settings").then((s) => setLyricsOn(s.lyrics));
     const un = [
       listen<Snapshot>("state", (e) => setSnap(e.payload)),
       listen<[Hud["kind"], number, boolean]>("hud", (e) => {
@@ -111,7 +140,15 @@ export default function App() {
         showHud({ kind, level, flag });
       }),
       listen<string>("calendar", (e) => setEvents(parseIcs(e.payload))),
+      listen<Agents>("agents", (e) => setAgents(e.payload)),
+      listen<[string, string]>("agent_done", (e) => {
+        cheer();
+        showHud({ kind: "agent", level: 1, flag: false, text: `Claude finished · ${e.payload[0]}` }, 8000);
+      }),
+      listen<boolean>("lyrics_enabled", (e) => setLyricsOn(e.payload)),
+      listen<boolean>("away", (e) => setAway(e.payload)),
       listen<string>("download", (e) => {
+        cheer();
         addToShelf([e.payload]);
         showHud({ kind: "download", level: 1, flag: false, text: fileName(e.payload) }, 4000);
       }),
@@ -142,6 +179,36 @@ export default function App() {
     };
   }, [artRev]);
 
+  // End the pet's happy spell on time.
+  useEffect(() => {
+    const ms = cheerUntil - Date.now();
+    if (ms <= 0) return;
+    const id = window.setTimeout(() => setNow(Date.now()), ms + 50);
+    return () => clearTimeout(id);
+  }, [cheerUntil]);
+
+  // Lyrics: one lookup per track, only when opted in. Cached for the session.
+  const track = snap.media ? `${snap.media.artist}\u0000${snap.media.title}` : "";
+  useEffect(() => {
+    const m = snap.media;
+    setLyrics([]);
+    if (!lyricsOn || !m?.title) return;
+    const hit = lyricsCache.current.get(track);
+    if (hit) return setLyrics(hit);
+    let live = true;
+    invoke<string>("lyrics", { artist: m.artist, title: m.title, secs: Math.round(m.duration_ms / 1000) })
+      .then((lrc) => parseLrc(lrc))
+      .catch(() => [] as Line[])
+      .then((lines) => {
+        lyricsCache.current.set(track, lines);
+        if (live) setLyrics(lines);
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch per track, not per position tick
+  }, [track, lyricsOn]);
+
   // Clock: one update per minute, aligned to the minute boundary.
   useEffect(() => {
     let id: number;
@@ -162,6 +229,7 @@ export default function App() {
       if (t >= timerEnd) {
         setTimerEnd(null);
         if (audio.current) chime(audio.current);
+        cheer();
         showHud({ kind: "timer", level: 1, flag: false }, 6000);
       }
     }, 1000);
@@ -192,7 +260,7 @@ export default function App() {
     const d = dragStart.current;
     if (!d || !(e.buttons & 1) || Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
     dragStart.current = null;
-    invoke("drag_out", { paths: [d.path] });
+    invoke("drag_out", { paths: [d.path] }).then(() => invoke("refresh_transparency"));
   };
   const onTransitionEnd = (e: React.TransitionEvent) => {
     if (!open && e.target === e.currentTarget && e.propertyName === "width") invoke("resize", COLLAPSED);
@@ -204,6 +272,11 @@ export default function App() {
   const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const clock = hm(now);
   const playing = !!media?.playing;
+  const working = agents.sessions.filter((a) => a.working && now - a.last < STALE_MS);
+  const topAgent = agents.sessions[0];
+  // Pet mood, most important first. `now` ticks each minute, so also re-check when a
+  // cheer ends (below).
+  const mood: Mood = Date.now() < cheerUntil ? "happy" : working.length ? "work" : away ? "sleep" : "idle";
 
   // Next timed event that hasn't ended, looking up to 36 hours ahead. Recomputed each minute.
   const next = useMemo(
@@ -226,11 +299,18 @@ export default function App() {
       onMouseLeave={onLeave}
       onTransitionEnd={onTransitionEnd}
       onContextMenu={(e) => e.preventDefault()}
+      // Clicking inside the webview drops the window's transparency (white corners); restore it.
+      onPointerUp={() => invoke("refresh_transparency")}
     >
       <div className="layer mini-layer" aria-hidden={open}>
         {hud ? (
           <div className="hud">
-            {hud.kind === "download" ? (
+            {hud.kind === "agent" ? (
+              <>
+                <Icon d={ICONS.agent} />
+                <span className="hud-text wide">{hud.text}</span>
+              </>
+            ) : hud.kind === "download" ? (
               <>
                 <Icon d={ICONS.download} />
                 <span className="hud-text">{hud.text}</span>
@@ -259,9 +339,19 @@ export default function App() {
           </div>
         ) : (
           <div className="mini">
-            <span className="slot">{playing && art && <img className="mini-art" src={art} alt="" />}</span>
+            <span className="slot">
+              {playing && art ? <img className="mini-art" src={art} alt="" /> : <Pet mood={mood} key={mood} />}
+            </span>
             <span className={`mono center${remaining || soon ? " accent" : ""}`}>{remaining ?? soon ?? clock}</span>
-            <span className="slot">{playing ? <Icon d={ICONS.play} size={14} /> : <span className="dot" />}</span>
+            <span className="slot">
+              {working.length ? (
+                <span className="dot working" aria-label="Agent working" />
+              ) : playing ? (
+                <Icon d={ICONS.play} size={14} />
+              ) : (
+                <span className="dot" />
+              )}
+            </span>
           </div>
         )}
       </div>
@@ -272,7 +362,13 @@ export default function App() {
             {art ? <img className="art" src={art} alt="" /> : <div className="art empty" />}
             <div className="meta">
               <div className="title">{media.title || "Unknown title"}</div>
-              <div className="sub">{media.artist}</div>
+              <div className="sub-row">
+                <div className="sub">{media.artist}</div>
+                {open && playing && <Equalizer />}
+              </div>
+              {open && lyrics.length > 0 && (
+                <LyricLine lines={lyrics} positionMs={media.position_ms} positionAt={media.position_at} playing={playing} />
+              )}
             </div>
             <div className="controls">
               <button aria-label="Previous" onClick={() => invoke("media", { action: "prev" })}>
@@ -329,6 +425,19 @@ export default function App() {
               Drop files on the island to keep them here
             </div>
           )}
+        </div>
+        <div className="agents">
+          {topAgent ? (
+            <>
+              <span className={`dot${working.includes(topAgent) ? " working" : " idle"}`} />
+              <span className="agent-name">{topAgent.agent}</span>
+              <span className="agent-title">{topAgent.title || topAgent.project}</span>
+              {working.length > 1 && <span className="more">+{working.length - 1} working</span>}
+            </>
+          ) : (
+            <span className="agent-title">No agent sessions today</span>
+          )}
+          <span className="tokens mono">{fmtTokens(agents.tokens_today)} tokens today</span>
         </div>
         <div className="bar">
           {battery && (

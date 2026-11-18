@@ -1,0 +1,346 @@
+:root {
+  --fg: #f5f5f5;
+  --dim: rgba(245, 245, 245, 0.55);
+  --accent: #3ddc84;
+  --chip: rgba(255, 255, 255, 0.1);
+  /* Smooth deceleration, no overshoot: the window region clips anything past the final size. */
+  --morph: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font: 13px "Segoe UI Variable", "Segoe UI", sans-serif;
+  color: var(--fg);
+}
+
+button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  border-radius: 999px;
+  cursor: default;
+}
+button:hover {
+  background: var(--chip);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+.accent {
+  color: var(--accent);
+}
+
+/* Sizes must match COLLAPSED / EXPANDED in App.tsx and MAX in lib.rs. */
+.pill {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 36px;
+  border-radius: 18px;
+  background: #000;
+  overflow: hidden;
+  transition:
+    width 0.34s var(--morph),
+    height 0.34s var(--morph),
+    border-radius 0.34s var(--morph);
+}
+.pill.open {
+  width: 420px;
+  height: 236px;
+  border-radius: 30px;
+  transition-duration: 0.42s;
+}
+
+/* Layers keep their own fixed size, centered at the top, and crossfade. */
+.layer {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  transform-origin: top center;
+  transition:
+    opacity 0.14s ease,
+    filter 0.14s ease,
+    transform 0.3s var(--morph);
+}
+
+/* collapsed */
+.mini-layer {
+  width: 200px;
+  height: 36px;
+  transition-delay: 0.12s; /* reappear once the pill has mostly shrunk */
+}
+.open .mini-layer {
+  opacity: 0;
+  filter: blur(4px);
+  transition-delay: 0s;
+}
+.mini,
+.hud {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+.mini {
+  justify-content: space-between;
+}
+.slot {
+  width: 24px;
+  display: flex;
+  justify-content: center;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.center {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.mini-art {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.hud {
+  gap: 10px;
+  padding: 0 14px;
+  justify-content: center;
+  animation: pop 0.2s var(--morph);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+.meter {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--chip);
+  overflow: hidden;
+}
+.meter > div {
+  height: 100%;
+  background: var(--fg);
+  transition: width 0.12s ease;
+}
+.pct {
+  min-width: 34px;
+  text-align: right;
+  color: var(--dim);
+}
+
+/* expanded */
+.panel {
+  width: 420px;
+  height: 236px;
+  padding: 16px 18px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateX(-50%) scale(0.94);
+  pointer-events: none;
+}
+.open .panel {
+  opacity: 1;
+  filter: none;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  transition:
+    opacity 0.24s ease 0.1s,
+    filter 0.24s ease 0.1s,
+    transform 0.42s var(--morph);
+}
+.media {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.art {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex: none;
+}
+.art.empty {
+  background: var(--chip);
+}
+.meta {
+  flex: 1;
+  min-width: 0;
+}
+.title,
+.sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.sub {
+  color: var(--dim);
+  margin-top: 2px;
+}
+.idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+.next-event {
+  margin-top: 6px;
+  max-width: 360px;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.big-clock {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.controls button {
+  width: 36px;
+  height: 36px;
+}
+.shelf {
+  display: flex;
+  gap: 6px;
+  height: 48px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.item {
+  position: relative;
+  flex: none;
+  width: 92px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--chip);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.item:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.ext {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+}
+.name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item .remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+}
+.item:hover .remove {
+  opacity: 1;
+}
+.shelf-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.hud-text {
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dim);
+}
+.batt,
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.batt.charging {
+  color: var(--accent);
+}
+.timer button {
+  width: 24px;
+  height: 24px;
+}
+.timer .chip {
+  width: auto;
+  padding: 0 10px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.timer .chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill,
+  .layer,
+  .open .panel,
+  .meter > div {
+    transition-duration: 0.01s; /* not "none": transitionend must still fire to shrink the region */
+    transition-delay: 0s;
+  }
+  .hud {
+    animation: none;
+  }
+}

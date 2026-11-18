@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { occurrences, parseIcs, type Raw } from "./ics";
 import { parseLrc, type Line } from "./lyrics";
-import { Equalizer, LyricLine, Pet, type Mood } from "./extras";
+import { Equalizer, LyricLines, Pet, useLyricIndex, type Mood } from "./extras";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./island.css";
 
+type Device = { name: string; percent: number; kind: string };
 type Media = {
   title: string;
   artist: string;
@@ -21,11 +22,18 @@ type Agents = {
   sessions: { agent: string; title: string; project: string; working: boolean; last: number }[];
   tokens_today: number;
 };
-type Hud = { kind: "volume" | "brightness" | "power" | "timer" | "download" | "agent"; level: number; flag: boolean; text?: string };
+type Hud = {
+  kind: "volume" | "brightness" | "power" | "timer" | "download" | "agent" | "notification" | "device";
+  level: number;
+  flag: boolean;
+  text?: string;
+  icon?: string; // device HUD: the device-type icon path
+};
 
 // Must match .pill / .pill.open in island.css.
 const COLLAPSED = { w: 200, h: 36 };
-const EXPANDED = { w: 420, h: 268 }; // also MAX in lib.rs
+const COLLAPSED_LYRICS = { w: 340, h: 36 }; // also .pill.wide in island.css
+const EXPANDED = { w: 516, h: 268 }; // open pill + shortcut columns; also MAX in lib.rs
 const PRESETS = [1, 5, 15, 25];
 
 const ICONS = {
@@ -39,17 +47,29 @@ const ICONS = {
     "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 1h2v3h-2zm0 19h2v3h-2zM1 11h3v2H1zm19 0h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zm12.1-12.1 2.1-2.1 1.4 1.4-2.1 2.1z",
   power: "M11 21h-1l1-7H7.5c-.6 0-.6-.3-.4-.6L13 3h1l-1 7h3.5c.5 0 .6.3.4.6z",
   battery: "M16 4h-2V2h-4v2H8a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z",
+  mixer: "M7 3h2v6h2v2H5V9h2zm0 10h2v8H7zm8-10h2v10h2v2h-6v-2h2zm0 14h2v4h-2z",
   timer:
     "M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
   shelf: "M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3z",
   agent: "M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z",
+  bell: "M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4h-2v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z",
   download: "M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z",
   close: "M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z",
+  mouse: "M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm-1 3h2v4h-2z",
+  keyboard: "M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm2 3v2h2V9zm4 0v2h2V9zm4 0v2h2V9zm4 0v2h2V9zM7 13v2h10v-2z",
+  headphones: "M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h2a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z",
+  bluetooth: "M11 2h1l6 5.5-4.6 4.5 4.6 4.5-6 5.5h-1v-7.6l-4.3 4.2-1.4-1.4 5.7-5.2-5.7-5.2 1.4-1.4 4.3 4.2zm2 2.5v5l2.7-2.5zm0 10v5l2.7-2.5z",
+  gear: "M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54a7.4 7.4 0 0 0-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z",
+  activity: "M3 11h4.3L10 3.6l4 13.2 2.4-5.8H21v2h-3.3L14 21.4 10 8.2 8.7 13H3z",
+  calculator: "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 3v4h10V5zm0 7v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2z",
+  screenshot: "M7 3h2v4h8a2 2 0 0 1 2 2v8h3v2h-3v3h-2v-3H9a2 2 0 0 1-2-2V9H4V7h3zm2 6v8h8V9z",
+  folder: "M3 6a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
 };
+const DEVICE_ICON: Record<string, string> = { mouse: ICONS.mouse, keyboard: ICONS.keyboard, headphones: ICONS.headphones };
 
 const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d={d} />
+    <path d={d} fillRule="evenodd" />
   </svg>
 );
 
@@ -108,6 +128,10 @@ export default function App() {
   const [shelf, setShelf] = useState<string[]>(loadShelf);
   const [events, setEvents] = useState<Raw[]>([]);
   const [agents, setAgents] = useState<Agents>({ sessions: [], tokens_today: 0 });
+  const [devices, setDevices] = useState<Device[]>([]);
+  // Play/pause shown right after a click, until the player reports back.
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const optimisticTimer = useRef<number | undefined>(undefined);
   const dragStart = useRef<{ x: number; y: number; path: string } | null>(null);
   const [lyricsOn, setLyricsOn] = useState(false);
   const [lyrics, setLyrics] = useState<Line[]>([]);
@@ -132,6 +156,7 @@ export default function App() {
     invoke<Snapshot>("snapshot").then(setSnap);
     invoke<string>("calendar").then((t) => setEvents(parseIcs(t)));
     invoke<Agents>("agents").then(setAgents);
+    invoke<Device[]>("devices").then(setDevices);
     invoke<{ lyrics: boolean }>("get_settings").then((s) => setLyricsOn(s.lyrics));
     const un = [
       listen<Snapshot>("state", (e) => setSnap(e.payload)),
@@ -147,6 +172,17 @@ export default function App() {
       }),
       listen<boolean>("lyrics_enabled", (e) => setLyricsOn(e.payload)),
       listen<boolean>("away", (e) => setAway(e.payload)),
+      listen<Device[]>("devices", (e) => setDevices(e.payload)),
+      listen<Device>("device_connected", (e) =>
+        showHud({ kind: "device", level: e.payload.percent / 100, flag: false, text: `${e.payload.percent}%`, icon: DEVICE_ICON[e.payload.kind] }, 4000),
+      ),
+      listen<Device>("device_low", (e) =>
+        showHud({ kind: "device", level: e.payload.percent / 100, flag: true, text: `Low · ${e.payload.percent}%`, icon: DEVICE_ICON[e.payload.kind] }, 6000),
+      ),
+      listen<[string, string, string]>("notification", (e) => {
+        const [app, title] = e.payload;
+        showHud({ kind: "notification", level: 1, flag: false, text: [app, title].filter(Boolean).join(" · ") }, 5000);
+      }),
       listen<string>("download", (e) => {
         cheer();
         addToShelf([e.payload]);
@@ -178,6 +214,16 @@ export default function App() {
       if (url) URL.revokeObjectURL(url);
     };
   }, [artRev]);
+
+  // When a track starts (or playback resumes), show its title in the pill for a few seconds.
+  const [songFlash, setSongFlash] = useState<string | null>(null);
+  const songTitle = snap.media?.playing ? snap.media.title : "";
+  useEffect(() => {
+    if (!songTitle) return setSongFlash(null);
+    setSongFlash(songTitle);
+    const id = window.setTimeout(() => setSongFlash(null), 4000);
+    return () => clearTimeout(id);
+  }, [songTitle]);
 
   // End the pet's happy spell on time.
   useEffect(() => {
@@ -262,8 +308,9 @@ export default function App() {
     dragStart.current = null;
     invoke("drag_out", { paths: [d.path] }).then(() => invoke("refresh_transparency"));
   };
+  // Shrinking: the region follows once the animation ends (grow is handled below).
   const onTransitionEnd = (e: React.TransitionEvent) => {
-    if (!open && e.target === e.currentTarget && e.propertyName === "width") invoke("resize", COLLAPSED);
+    if (!open && e.target === e.currentTarget && e.propertyName === "width") invoke("resize", wide ? COLLAPSED_LYRICS : COLLAPSED);
   };
 
   const { media, battery } = snap;
@@ -271,7 +318,11 @@ export default function App() {
   const date = new Date(now);
   const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const clock = hm(now);
-  const playing = !!media?.playing;
+  const playing = optimistic ?? !!media?.playing;
+  // Synced lyrics: the collapsed pill widens and shows the current line while a song plays.
+  const li = useLyricIndex(lyrics, media?.position_ms ?? 0, media?.position_at ?? 0, playing);
+  const lyricText = playing && lyrics.length ? (li >= 0 && lyrics[li].text) || "♪" : null;
+  const wide = !!lyricText;
   const working = agents.sessions.filter((a) => a.working && now - a.last < STALE_MS);
   const topAgent = agents.sessions[0];
   // Pet mood, most important first. `now` ticks each minute, so also re-check when a
@@ -290,22 +341,53 @@ export default function App() {
     t <= now ? "Now" : (new Date(t).getDate() === date.getDate() ? "" : "Tomorrow ") + hm(t);
   const nextLabel = next ? `${when(next.start)} · ${next.title}` : null;
 
+  // Growing into the lyrics width: widen the clickable region first so nothing is clipped.
+  useEffect(() => {
+    if (wide && !open) invoke("resize", COLLAPSED_LYRICS);
+  }, [wide, open]);
+
   // Both layers are always rendered at their own fixed size and crossfade, so nothing
   // reflows while the pill changes shape.
+  // One hover area for the pill and the shortcut columns beside it, so moving onto a
+  // shortcut doesn't close the island. The window region keeps the rest click-through.
+  const side = (items: [string, string, string][]) => (
+    <div className="side" aria-hidden={!open}>
+      {items.map(([target, label, icon]) => (
+        <button key={target} className="shortcut" aria-label={label} title={label} tabIndex={open ? 0 : -1} onClick={() => invoke("launch", { target })}>
+          <Icon d={icon} size={18} />
+        </button>
+      ))}
+    </div>
+  );
   return (
     <div
-      className={`pill${open ? " open" : ""}`}
+      className={`island${open ? " open" : ""}`}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      onTransitionEnd={onTransitionEnd}
       onContextMenu={(e) => e.preventDefault()}
       // Clicking inside the webview drops the window's transparency (white corners); restore it.
       onPointerUp={() => invoke("refresh_transparency")}
     >
+      {side([
+        ["settings", "Pulo settings", ICONS.gear],
+        ["mixer", "Volume mixer", ICONS.mixer],
+        ["task_manager", "Task Manager", ICONS.activity],
+      ])}
+    <div className={`pill${open ? " open" : ""}${wide ? " wide" : ""}`} onTransitionEnd={onTransitionEnd}>
       <div className="layer mini-layer" aria-hidden={open}>
         {hud ? (
           <div className="hud">
-            {hud.kind === "agent" ? (
+            {hud.kind === "device" ? (
+              <>
+                <Icon d={hud.icon ?? ICONS.bluetooth} />
+                <span className={`hud-text wide${hud.flag ? " low" : ""}`}>{hud.text}</span>
+              </>
+            ) : hud.kind === "notification" ? (
+              <>
+                <Icon d={ICONS.bell} />
+                <span className="hud-text wide">{hud.text}</span>
+              </>
+            ) : hud.kind === "agent" ? (
               <>
                 <Icon d={ICONS.agent} />
                 <span className="hud-text wide">{hud.text}</span>
@@ -342,7 +424,18 @@ export default function App() {
             <span className="slot">
               {playing && art ? <img className="mini-art" src={art} alt="" /> : <Pet mood={mood} key={mood} />}
             </span>
-            <span className={`mono center${remaining || soon ? " accent" : ""}`}>{remaining ?? soon ?? clock}</span>
+            {(() => {
+              const status = remaining ?? soon;
+              const lyric = !status && !songFlash && lyricText;
+              return (
+                <span
+                  className={`center${lyric ? " lyric-mini" : " mono"}${status ? " accent" : ""}${!status && songFlash ? " flash" : ""}`}
+                  key={status ? "status" : (songFlash ?? (lyric ? `l${li}` : "clock"))}
+                >
+                  {status ?? songFlash ?? lyricText ?? clock}
+                </span>
+              );
+            })()}
             <span className="slot">
               {working.length ? (
                 <span className="dot working" aria-label="Agent working" />
@@ -366,19 +459,23 @@ export default function App() {
                 <div className="sub">{media.artist}</div>
                 {open && playing && <Equalizer />}
               </div>
-              {open && lyrics.length > 0 && (
-                <LyricLine lines={lyrics} positionMs={media.position_ms} positionAt={media.position_at} playing={playing} />
-              )}
+              {open && lyrics.length > 0 && <LyricLines lines={lyrics} i={li} />}
             </div>
             <div className="controls">
               <button aria-label="Previous" onClick={() => invoke("media", { action: "prev" })}>
                 <Icon d={ICONS.prev} size={20} />
               </button>
               <button
-                aria-label={media.playing ? "Pause" : "Play"}
-                onClick={() => invoke("media", { action: "toggle" })}
+                aria-label={playing ? "Pause" : "Play"}
+                onClick={() => {
+                  // Flip now; the player confirms within a second (see media_control).
+                  setOptimistic(!playing);
+                  clearTimeout(optimisticTimer.current);
+                  optimisticTimer.current = window.setTimeout(() => setOptimistic(null), 1500);
+                  invoke("media", { action: "toggle" });
+                }}
               >
-                <Icon d={media.playing ? ICONS.pause : ICONS.play} size={26} />
+                <Icon d={playing ? ICONS.pause : ICONS.play} size={26} />
               </button>
               <button aria-label="Next" onClick={() => invoke("media", { action: "next" })}>
                 <Icon d={ICONS.next} size={20} />
@@ -440,12 +537,20 @@ export default function App() {
           <span className="tokens mono">{fmtTokens(agents.tokens_today)} tokens today</span>
         </div>
         <div className="bar">
-          {battery && (
-            <span className={`batt${battery.charging ? " charging" : ""}`}>
-              <Icon d={battery.charging ? ICONS.power : ICONS.battery} size={14} />
-              {battery.percent}%
-            </span>
-          )}
+          <div className="bar-left">
+            {battery && (
+              <span className={`batt${battery.charging ? " charging" : ""}`}>
+                <Icon d={battery.charging ? ICONS.power : ICONS.battery} size={14} />
+                {battery.percent}%
+              </span>
+            )}
+            {devices.map((d) => (
+              <span key={d.name} className={`dev${d.percent <= 15 ? " low" : ""}`} title={`${d.name}: ${d.percent}%`} aria-label={`${d.name} battery ${d.percent}%`}>
+                <Icon d={DEVICE_ICON[d.kind] ?? ICONS.bluetooth} size={14} />
+                {d.percent}%
+              </span>
+            ))}
+          </div>
           <div className="timer">
             <Icon d={ICONS.timer} size={14} />
             {remaining ? (
@@ -465,6 +570,12 @@ export default function App() {
           </div>
         </div>
       </div>
+    </div>
+      {side([
+        ["calculator", "Calculator", ICONS.calculator],
+        ["screenshot", "Screenshot", ICONS.screenshot],
+        ["explorer", "File Explorer", ICONS.folder],
+      ])}
     </div>
   );
 }

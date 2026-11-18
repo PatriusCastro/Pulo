@@ -131,7 +131,12 @@ pub fn media_control(action: &str) {
     if let Ok(op) = op {
         let _ = op.get();
     }
-    poll_media(); // reflect the change now instead of on the next tick
+    // Players (browsers especially) report the new state a little after accepting the
+    // command, so check a few times now instead of waiting for the 1 Hz tick.
+    for ms in [100, 250, 500] {
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+        poll_media();
+    }
 }
 
 // ---------- volume ----------
@@ -340,6 +345,80 @@ pub fn fetch_lyrics(artist: &str, title: &str, secs: i64) -> std::result::Result
     let body = get().map_err(|e| e.message())?;
     let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     Ok(v["syncedLyrics"].as_str().unwrap_or_default().to_string())
+}
+
+// ---------- Windows notifications (packaged builds only) ----------
+
+/// Ask once for notification access. Must run on the UI thread or Windows shows no prompt.
+/// Doesn't wait for the answer; poll_notifications checks the status each second.
+pub fn request_notification_access() {
+    use windows::UI::Notifications::Management::*;
+    if let Ok(l) = UserNotificationListener::Current() {
+        if l.GetAccessStatus() == Ok(UserNotificationListenerAccessStatus::Unspecified) {
+            let _ = l.RequestAccessAsync();
+        }
+    }
+}
+
+static SEEN_NOTIFICATIONS: Mutex<Option<std::collections::HashSet<u32>>> = Mutex::new(None);
+
+/// Announce new toasts in the island. Needs package identity (the MSIX build) and the
+/// user's consent; in the plain .exe the listener is unavailable and this does nothing.
+// ponytail: polled from the 1 Hz loop; the NotificationChanged event isn't delivered to
+// desktop apps, and a background task trigger is more packaging than this needs.
+pub fn poll_notifications() {
+    use windows::UI::Notifications::{Management::*, *};
+    static DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DISABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Ok(l) = UserNotificationListener::Current() else {
+        DISABLED.store(true, std::sync::atomic::Ordering::Relaxed); // no package identity
+        return;
+    };
+    if l.GetAccessStatus() != Ok(UserNotificationListenerAccessStatus::Allowed) {
+        return; // not answered yet, or turned off in Settings > Privacy > Notifications
+    }
+    let read = || -> Result<Vec<(u32, String, String, String)>> {
+        let toast = KnownNotificationBindings::ToastGeneric()?;
+        let mut out = Vec::new();
+        for n in l.GetNotificationsAsync(NotificationKinds::Toast)?.get()? {
+            let app = n.AppInfo().and_then(|a| a.DisplayInfo()?.DisplayName()).map(|s| s.to_string()).unwrap_or_default();
+            let texts: Vec<String> = n
+                .Notification()
+                .and_then(|x| x.Visual()?.GetBinding(&toast)?.GetTextElements())
+                .map(|t| t.into_iter().filter_map(|e| e.Text().ok().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            out.push((n.Id()?, app, texts.first().cloned().unwrap_or_default(), texts.get(1).cloned().unwrap_or_default()));
+        }
+        Ok(out)
+    };
+    let Ok(list) = read() else { return };
+    let mut seen = SEEN_NOTIFICATIONS.lock().unwrap();
+    let first = seen.is_none(); // don't replay what was already in Action Center at startup
+    let ids = seen.get_or_insert_with(Default::default);
+    for (id, app, title, body) in list {
+        if ids.insert(id) && !first {
+            if let Some(a) = APP.get() {
+                let _ = a.emit("notification", (app, title, body));
+            }
+        }
+    }
+}
+
+/// Open Windows 11's own per-app volume mixer (Quick Settings), via its Win+Ctrl+V shortcut.
+// ponytail: native mixer instead of an in-island one. Build WASAPI session sliders
+// (IAudioSessionManager2 + ISimpleAudioVolume) only if this flyout isn't enough.
+pub fn open_mixer() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, ..Default::default() } },
+    };
+    let seq = [key(VK_LWIN, false), key(VK_CONTROL, false), key(VK_V, false), key(VK_V, true), key(VK_CONTROL, true), key(VK_LWIN, true)];
+    unsafe {
+        SendInput(&seq, std::mem::size_of::<INPUT>() as i32);
+    }
 }
 
 /// True once there's been no keyboard or mouse input for 5 minutes.

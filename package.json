@@ -11,7 +11,8 @@
     "start": "tauri dev",
     "exe": "tauri build --no-bundle",
     "exe:debug": "tauri build --debug --no-bundle",
-    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts && node --experimental-strip-types --no-warnings scripts/lyrics.check.ts"
+    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts && node --experimental-strip-types --no-warnings scripts/lyrics.check.ts",
+    "msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/msix.ps1"
   },
   "dependencies": {
     "react": "^19.1.0",

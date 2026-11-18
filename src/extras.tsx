@@ -30,20 +30,28 @@ export function Equalizer() {
   );
 }
 
-/** The lyric line at the current playback position. Ticks only while mounted. */
-export function LyricLine({ lines, positionMs, positionAt, playing }: { lines: Line[]; positionMs: number; positionAt: number; playing: boolean }) {
+/** Index of the lyric line at the current playback position. Checks 4x a second while
+ *  playing, but React only re-renders when the line actually changes. */
+export function useLyricIndex(lines: Line[], positionMs: number, positionAt: number, playing: boolean) {
   const [i, setI] = useState(-1);
   useEffect(() => {
     const tick = () => setI(lineAt(lines, positionMs + (playing && positionAt ? Date.now() - positionAt : 0)));
     tick();
-    if (!playing) return;
+    if (!playing || !lines.length) return;
     const id = window.setInterval(tick, 250);
     return () => clearInterval(id);
   }, [lines, positionMs, positionAt, playing]);
-  const text = i >= 0 ? lines[i].text : "";
+  return i;
+}
+
+/** Previous, current and next line; the current one highlighted. */
+export function LyricLines({ lines, i }: { lines: Line[]; i: number }) {
+  const at = (k: number) => (k >= 0 && k < lines.length ? lines[k].text || "♪" : "");
   return (
-    <div className="lyric" key={i}>
-      {text || "♪"}
+    <div className="lyrics" key={i} aria-live="off">
+      <div className="lyric dim">{at(i - 1)}</div>
+      <div className="lyric now">{i >= 0 ? at(i) : "♪"}</div>
+      <div className="lyric dim">{at(i + 1)}</div>
     </div>
   );
 }

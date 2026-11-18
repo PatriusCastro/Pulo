@@ -1,5 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="64" y="352" width="896" height="320" rx="160" fill="#000"/>
-  <rect x="64" y="352" width="896" height="320" rx="160" fill="none" stroke="#2a2a2a" stroke-width="16"/>
-  <circle cx="752" cy="512" r="64" fill="#3ddc84"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2d35"/>
+      <stop offset="1" stop-color="#0c0d10"/>
+    </linearGradient>
+    <linearGradient id="art" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffb35c"/>
+      <stop offset="1" stop-color="#ff5f8f"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#3ddc84" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#3ddc84" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- tile: reads on light and dark taskbars -->
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="url(#tile)"/>
+  <rect x="48" y="48" width="928" height="928" rx="216" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="8"/>
+  <!-- the island, sitting near the top like it does on screen -->
+  <rect x="152" y="300" width="720" height="250" rx="125" fill="#000"/>
+  <rect x="152" y="300" width="720" height="250" rx="125" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="6"/>
+  <!-- album art + status dot -->
+  <rect x="222" y="355" width="140" height="140" rx="36" fill="url(#art)"/>
+  <circle cx="738" cy="425" r="110" fill="url(#glow)"/>
+  <circle cx="738" cy="425" r="52" fill="#3ddc84"/>
+  <!-- hint of the panel below, so it isn't just a pill -->
+  <rect x="232" y="640" width="560" height="44" rx="22" fill="#ffffff" fill-opacity=".16"/>
+  <rect x="232" y="720" width="360" height="44" rx="22" fill="#ffffff" fill-opacity=".09"/>
 </svg>

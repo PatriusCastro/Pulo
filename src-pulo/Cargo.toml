@@ -21,9 +21,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 windows-core = "0.61" # needed by the #[implement] macro
+windows-collections = "0.2" # IIterable for WinRT property lists
 windows = { version = "0.61", features = [
+  "ApplicationModel",
+  "Devices_Enumeration",
   "Foundation",
+  "Foundation_Collections",
   "Media_Control",
+  "UI_Notifications",
+  "UI_Notifications_Management",
   "Storage_Streams",
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
@@ -38,6 +44,7 @@ windows = { version = "0.61", features = [
   "Win32_System_Power",
   "Win32_System_Registry",
   "Win32_System_SystemInformation",
+  "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",

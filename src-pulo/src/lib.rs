@@ -1,4 +1,5 @@
 mod agents;
+mod devices;
 mod eq;
 mod sys;
 
@@ -24,7 +25,9 @@ const TOP_MARGIN: f64 = 6.0;
 // The window is always the largest pill size and never resizes (resizing makes the web
 // content jump for a frame). Instead its window region, which is the only part that is
 // drawn and clickable, is set to the pill's current size. Clicks elsewhere pass through.
-const MAX: (f64, f64) = (420.0, 268.0); // must match .pill.open in island.css
+// The open pill (420 wide, .pill.open in island.css) plus a 48 px shortcut column on
+// each side (.side). Must match EXPANDED in App.tsx.
+const MAX: (f64, f64) = (516.0, 268.0);
 static REGION: Mutex<(f64, f64)> = Mutex::new((200.0, 36.0));
 
 fn hwnd(w: &WebviewWindow) -> HWND {
@@ -78,6 +81,31 @@ fn resize(window: WebviewWindow, w: f64, h: f64) {
     *REGION.lock().unwrap() = (w, h);
     apply_region(&window);
     keep_transparent(&window);
+}
+
+/// Island shortcuts. Fixed list: the webview can't ask Windows to run anything else.
+#[tauri::command]
+fn launch(app: AppHandle, target: String) {
+    let cmd = match target.as_str() {
+        "settings" => return open_settings(&app),
+        "mixer" => return sys::open_mixer(),
+        "calculator" => "calc.exe",
+        "screenshot" => "ms-screenclip:",
+        "explorer" => "explorer.exe",
+        "task_manager" => "taskmgr.exe",
+        _ => return,
+    };
+    sys::open_path(cmd);
+}
+
+#[tauri::command]
+fn devices() -> Vec<devices::Device> {
+    devices::DEVICES.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn open_mixer() {
+    sys::open_mixer();
 }
 
 /// Called by the UI after every click: clicking inside the webview drops the transparency.
@@ -236,10 +264,22 @@ fn fullscreen_app_active() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // One island only: a second copy would stack its window on top of this one.
+    // The handle stays open for the life of the process.
+    unsafe {
+        use windows::Win32::{Foundation::*, System::Threading::CreateMutexW};
+        let _ = CreateMutexW(None, true, windows::core::w!("Local\\Pulo.SingleInstance"));
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            return;
+        }
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             resize,
             refresh_transparency,
+            open_mixer,
+            devices,
+            launch,
             snapshot,
             media_art,
             media,
@@ -283,8 +323,10 @@ pub fn run() {
                 .build(app)?;
 
             sys::watch_power();
+            sys::request_notification_access(); // UI thread: required for the consent prompt
             thread::spawn(|| sys::watch_downloads());
             thread::spawn(|| agents::watch());
+            thread::spawn(devices::watch);
             thread::spawn(eq::run);
 
             // Calendar refresh every 10 minutes.
@@ -325,6 +367,7 @@ pub fn run() {
                         place(&w); // monitor plugged/unplugged, resolution or DPI change
                     }
                     sys::poll_media();
+                    sys::poll_notifications();
                     if sys::user_away() != away {
                         away = !away;
                         use tauri::Emitter;

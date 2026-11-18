@@ -41,6 +41,55 @@ button:focus-visible {
 }
 
 /* Sizes must match COLLAPSED / EXPANDED in App.tsx and MAX in lib.rs. */
+/* Hover area covering the pill and the shortcut columns. The window region decides what
+   is actually clickable: just the pill when collapsed, all of it when open. */
+.island {
+  position: fixed;
+  inset: 0;
+}
+/* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
+.side {
+  position: fixed;
+  top: 0;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.3s var(--morph);
+}
+.side:first-child {
+  left: 0;
+}
+.side:last-child {
+  right: 0;
+}
+.open > .side {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 0.12s; /* after the pill has mostly grown */
+}
+.shortcut {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #000;
+  color: var(--fg);
+}
+.shortcut:hover {
+  background: #1c1c1e;
+}
+.shortcut:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .pill {
   position: fixed;
   top: 0;
@@ -118,6 +167,19 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
+}
+/* Each change of the center item (clock -> song title -> clock) fades in once. */
+.center {
+  animation: center-in 0.3s ease;
+}
+.center.flash {
+  font-weight: 500;
+  color: rgba(245, 245, 245, 0.8);
+}
+@keyframes center-in {
+  from {
+    opacity: 0;
+  }
 }
 .mini-art {
   width: 24px;
@@ -235,13 +297,40 @@ button:focus-visible {
   transform: scaleY(0.12);
   transform-origin: bottom;
 }
-.lyric {
+/* Expanded: previous / current / next line. The block slides in on each line change. */
+.lyrics {
   margin-top: 6px;
-  color: var(--accent);
+  animation: lyric-in 0.25s ease;
+}
+.lyric {
   font-size: 12px;
+  line-height: 16px;
+  min-height: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.lyric.now {
+  color: var(--accent);
+  font-weight: 600;
+}
+.lyric.dim {
+  color: rgba(245, 245, 245, 0.35);
+}
+/* Collapsed: the pill widens to fit the current line. */
+.pill.wide {
+  width: 340px;
+}
+.pill.open.wide {
+  width: 420px;
+}
+.wide .mini-layer {
+  width: 340px;
+}
+.lyric-mini {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
   animation: lyric-in 0.25s ease;
 }
 @keyframes lyric-in {
@@ -395,6 +484,23 @@ button:focus-visible {
   justify-content: space-between;
   color: var(--dim);
 }
+.bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dev {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.dev.low,
+.hud-text.low {
+  color: #ff6b5e;
+}
 .batt,
 .timer {
   display: flex;
@@ -427,7 +533,9 @@ button:focus-visible {
     transition-delay: 0s;
   }
   .hud,
-  .lyric,
+  .lyrics,
+  .lyric-mini,
+  .center,
   .pet.happy {
     animation: none;
   }

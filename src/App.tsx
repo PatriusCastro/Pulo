@@ -175,18 +175,39 @@ function save(key: string, value: unknown) {
 
 /** Browsers report their own logo as the album art until the page sets a cover (seen with
  *  Chrome). Logos are round with see-through corners; covers are solid rectangles. */
-async function isAppIcon(blob: Blob) {
+async function inspectArt(blob: Blob): Promise<{ icon: boolean; tint: string | null }> {
   try {
     const bmp = await createImageBitmap(blob);
     const c = new OffscreenCanvas(16, 16);
     const g = c.getContext("2d")!;
     g.drawImage(bmp, 0, 0, 16, 16);
     bmp.close();
-    const a = (x: number, y: number) => g.getImageData(x, y, 1, 1).data[3];
-    return [a(0, 0), a(15, 0), a(0, 15), a(15, 15)].some((v) => v < 250);
+    const px = g.getImageData(0, 0, 16, 16).data;
+    const a = (x: number, y: number) => px[(y * 16 + x) * 4 + 3];
+    const icon = [a(0, 0), a(15, 0), a(0, 15), a(15, 15)].some((v) => v < 250);
+    return { icon, tint: icon ? null : tintOf(px) };
   } catch {
-    return false; // undecodable: let the <img> deal with it
+    return { icon: false, tint: null }; // undecodable: let the <img> deal with it
   }
+}
+
+/** The cover's average colour as a deep background shade (like Apple Music's lyrics), dark
+ *  enough that white text keeps its contrast whatever the cover. */
+function tintOf(px: Uint8ClampedArray) {
+  let r = 0, g = 0, b = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    r += px[i];
+    g += px[i + 1];
+    b += px[i + 2];
+  }
+  const n = px.length / 4;
+  [r, g, b] = [r / n / 255, g / n / 255, b / n / 255];
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const l = (max + min) / 2;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return `hsl(${Math.round(h * 60 + 360) % 360} ${Math.round(Math.min(s, 0.55) * 100)}% 20%)`;
 }
 
 function chime(ctx: AudioContext) {
@@ -219,6 +240,7 @@ export default function App() {
 
   const [snap, setSnap] = useState<Snapshot>({ media: null, battery: null });
   const [art, setArt] = useState<string | null>(null);
+  const [tint, setTint] = useState<string | null>(null); // cover colour, behind the music page
   const [hud, setHud] = useState<Hud | null>(null);
   const [timerEnd, setTimerEnd] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -414,16 +436,20 @@ export default function App() {
   // Album art: refetch raw bytes whenever Rust bumps art_rev.
   const artRev = snap.media?.art_rev;
   useEffect(() => {
-    if (!artRev) return setArt(null);
+    if (!artRev) {
+      setTint(null);
+      return setArt(null);
+    }
     let url: string | null = null;
     let alive = true;
     invoke<ArrayBuffer>("media_art").then(async (buf) => {
       const blob = new Blob([buf]);
       // An app's logo isn't album art: show nothing (the pet) until the real cover arrives.
-      const keep = buf.byteLength > 0 && !(await isAppIcon(blob));
+      const seen = buf.byteLength > 0 ? await inspectArt(blob) : { icon: true, tint: null };
       if (!alive) return;
-      url = keep ? URL.createObjectURL(blob) : null;
+      url = seen.icon ? null : URL.createObjectURL(blob);
       setArt(url);
+      setTint(seen.tint);
     });
     return () => {
       alive = false;
@@ -737,8 +763,15 @@ export default function App() {
       onSeek={(ms) => invoke("media", { action: "seek", value: Math.round(ms) })}
     />
   );
+  const lyricsBtn = lyricsOn && (
+    <button className={`icon-btn${showLyrics ? " on" : ""}`} aria-label="Lyrics" aria-pressed={showLyrics} onClick={toggleLyrics}>
+      <Icon d={ICONS.lyrics} size={16} />
+    </button>
+  );
+  // Lyrics on: they take the panel, with the player shrunk to one row above them.
+  const lyricsMode = lyricsOn && showLyrics;
   const musicEl = media && (
-    <div className="music">
+    <div className={`music${lyricsMode ? " lyrics-mode" : ""}`}>
       <div className="media">
         <button className="icon-btn" aria-label="Back" onClick={() => setMusicPage(false)}>
           <Icon d={ICONS.back} size={16} />
@@ -749,8 +782,16 @@ export default function App() {
           <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
         </div>
         {transport}
+        {lyricsMode && lyricsBtn}
       </div>
       {progressEl}
+      {lyricsMode ? (
+        lyrics.length ? (
+          <LyricsPanel lines={lyrics} i={li} onSeek={media.can_seek ? (ms) => invoke("media", { action: "seek", value: ms }) : undefined} />
+        ) : (
+          <div className="lyrics-none">No synced lyrics for this song</div>
+        )
+      ) : (
       <div className="music-row">
         {media.shuffle !== null && (
           <button className={`icon-btn${media.shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={media.shuffle} onClick={() => invoke("media", { action: "shuffle" })}>
@@ -781,17 +822,13 @@ export default function App() {
             invoke("set_volume", { level: +e.target.value });
           }}
         />
-        {lyricsOn && (
-          <button className={`icon-btn${showLyrics ? " on" : ""}`} aria-label="Lyrics" aria-pressed={showLyrics} onClick={toggleLyrics}>
-            <Icon d={ICONS.lyrics} size={16} />
-          </button>
-        )}
+        {lyricsBtn}
       </div>
-      {lyricsOn && showLyrics && (
-        lyrics.length ? <LyricsPanel lines={lyrics} i={li} rows={6} /> : <div className="lyrics-none">No synced lyrics for this song</div>
       )}
     </div>
   );
+  // The music page has the whole panel: no tabs (Back returns), the cover's colour behind it.
+  const musicOpen = isOpen && shown === "now" && musicPage && !!media;
 
   const nowTab = musicPage && musicEl ? musicEl : (
     <>
@@ -1079,7 +1116,8 @@ export default function App() {
     >
       {side(prefs.left)}
       <div
-        className={`pill ${mode}`}
+        className={`pill ${mode}${musicOpen && tint ? " tinted" : ""}`}
+        style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined}
         onTransitionEnd={onTransitionEnd}
         onClick={() => {
           if (intent.current !== "open") {
@@ -1126,7 +1164,7 @@ export default function App() {
         </div>
 
         <div className="layer panel" aria-hidden={!isOpen}>
-          {tabs.length > 1 && (
+          {tabs.length > 1 && !musicOpen && (
             <div className="tabs" role="tablist">
               {tabs.map((t) => (
                 <button key={t} role="tab" aria-selected={t === shown} className={`tab${t === shown ? " on" : ""}`} tabIndex={isOpen ? 0 : -1} onClick={() => pickTab(t)}>

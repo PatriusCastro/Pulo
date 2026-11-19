@@ -1,5 +1,5 @@
 // Island extras: equalizer bars, lyrics, the position bar, and the pet.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { lineAt, type Line } from "./lyrics";
@@ -46,20 +46,31 @@ export function useLyricIndex(lines: Line[], positionMs: number, positionAt: num
   return i;
 }
 
-/** Height of one lyric row in px. Must match .lyric in island.css. */
-const LYRIC_ROW = 18;
-
-/** All lines in a window `rows` tall that scrolls with the song: the current line sits on
- *  the second row, highlighted. One short transition per line change, nothing looping. */
-export function LyricsPanel({ lines, i, rows }: { lines: Line[]; i: number; rows: number }) {
-  const top = Math.max(0, i - 1) * LYRIC_ROW;
+/** Big lyrics, the way music apps show them: whole lines that wrap, the one being sung bright,
+ *  the rest dim, scrolled so the line before it shows whole at the top. One transition per
+ *  line change, nothing looping. Clicking a line jumps there when `onSeek` is given. */
+export function LyricsPanel({ lines, i, onSeek }: { lines: Line[]; i: number; onSeek?: (ms: number) => void }) {
+  const list = useRef<HTMLDivElement>(null);
+  const [y, setY] = useState(0);
+  useLayoutEffect(() => {
+    const box = list.current;
+    const el = box?.children[Math.max(0, i - 1)] as HTMLElement | undefined;
+    if (el) setY(el.offsetTop);
+  }, [i, lines]);
   return (
-    <div className="lyrics-panel" style={{ height: rows * LYRIC_ROW }} aria-label="Lyrics">
-      <div className="lyrics-scroll" style={{ transform: `translateY(${-top}px)` }}>
+    <div className="lyrics-panel" aria-label="Lyrics">
+      <div ref={list} className="lyrics-scroll" style={{ transform: `translateY(${-y}px)` }}>
         {lines.map((l, k) => (
-          <div key={k} className={`lyric${k === i ? " now" : ""}`} aria-current={k === i || undefined}>
+          <button
+            key={k}
+            className={`lyric${k === i ? " now" : k < i ? " past" : ""}`}
+            aria-current={k === i || undefined}
+            tabIndex={onSeek ? 0 : -1}
+            disabled={!onSeek}
+            onClick={() => onSeek?.(l.t)}
+          >
             {l.text || "♪"}
-          </div>
+          </button>
         ))}
       </div>
     </div>

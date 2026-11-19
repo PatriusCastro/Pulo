@@ -478,33 +478,82 @@ button:focus-visible {
 .music-row .icon-btn:last-child {
   margin-left: auto;
 }
-/* No padding: it would show a sliver of the line scrolled out above. */
+/* Lyrics mode: the page is the lyrics, the player one row above them. */
+.music.lyrics-mode {
+  flex: 1;
+}
 .lyrics-panel {
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  /* Lines fade in at the top edge and out at the bottom instead of being cut. */
+  mask-image: linear-gradient(to bottom, transparent, #000 8px, #000 calc(100% - 36px), transparent);
 }
 .lyrics-scroll {
-  transition: transform 0.3s ease;
+  position: relative; /* offsetTop of each line is measured from here */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 0 120px;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .lyric {
-  font-size: 13px;
-  line-height: 18px; /* = LYRIC_ROW in extras.tsx */
-  height: 18px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: rgba(245, 245, 245, 0.4);
-  transition: color 0.3s ease;
+  display: block;
+  text-align: left;
+  border-radius: 6px;
+  margin: 0 -4px;
+  padding: 3px 4px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.32);
+  text-wrap: balance;
+  transition: color 0.4s ease;
+}
+.lyric.past {
+  color: rgba(255, 255, 255, 0.48);
 }
 .lyric.now {
-  color: var(--fg);
-  font-weight: 600;
+  color: #fff;
+}
+.lyric:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.75);
+}
+.lyric.now:not(:disabled):hover {
+  color: #fff;
+}
+.lyric:disabled {
+  cursor: default;
+}
+/* The cover's colour behind the music page, fading to the island's black at the bottom. */
+.pill {
+  background-color: #000;
+  transition:
+    width 0.34s var(--morph),
+    height 0.34s var(--morph),
+    border-radius 0.34s var(--morph),
+    background-color 0.5s ease;
+}
+.pill.tinted {
+  background-color: var(--tint);
+  background-image: linear-gradient(to bottom, transparent 30%, rgba(0, 0, 0, 0.55));
 }
 .lyrics-none {
   font-size: 12px;
   color: var(--dim);
   text-align: center;
   padding-top: 8px;
+}
+.lyrics-mode .lyrics-none {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 14px;
 }
 @media (prefers-reduced-motion: reduce) {
   .lyrics-scroll,

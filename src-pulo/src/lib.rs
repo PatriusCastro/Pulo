@@ -268,25 +268,28 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
     (x0..x0 + px(r.w, s)).contains(&c.x) && (y0..y0 + px(r.h, s)).contains(&c.y)
 }
 
-/// Click-through needs the window layered and transparent. Layered stays on for as long as
-/// the mode is: taking it off rebuilds the window's surface, which comes back white behind
-/// the pill. So switching between passing clicks and taking them only flips transparent.
-fn set_through(w: &WebviewWindow, layered: bool, through: bool) {
-    let set = |ex: isize, bit: WINDOW_EX_STYLE, on: bool| if on { ex | bit.0 as isize } else { ex & !(bit.0 as isize) };
+/// Click-through needs the window layered and transparent. Only while clicks pass through:
+/// a click on a layered window loses the see-through background (white behind the pill),
+/// so when it takes clicks again (Ctrl) it goes back to a normal window. Windows rebuilds
+/// the surface when layered comes off and must be told to repaint, or that shows white too.
+fn set_through(w: &WebviewWindow, through: bool) {
+    use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
+    let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;
     unsafe {
         let h = hwnd(w);
         let old = GetWindowLongPtrW(h, GWL_EXSTYLE);
-        let ex = set(set(old, WS_EX_LAYERED, layered), WS_EX_TRANSPARENT, through);
+        let ex = if through { old | bits } else { old & !bits };
         if ex == old {
             return;
         }
         SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
-        if layered && old & WS_EX_LAYERED.0 as isize == 0 {
+        if through {
             // A layered window draws nothing until it has an opacity.
             let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
         }
+        keep_transparent(w);
+        let _ = RedrawWindow(Some(h), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
-    keep_transparent(w);
 }
 
 /// Click-through mode: at rest (or peeking) the island passes clicks to whatever is under
@@ -296,18 +299,15 @@ fn set_through(w: &WebviewWindow, layered: bool, through: bool) {
 fn watch_click_through(w: WebviewWindow) {
     use tauri::Emitter;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
-    let (mut layered, mut through, mut dim) = (false, false, false);
+    let (mut through, mut dim) = (false, false);
     loop {
         let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
         let r = *REGION.lock().unwrap();
         let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
         let over = on && over_pill(&w, r);
         let t = on && r.h <= 36.0 && !key(VK_CONTROL);
-        if on != layered || t != through {
-            set_through(&w, on, t);
-            layered = on;
-        }
         if t != through {
+            set_through(&w, t);
             through = t;
             let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
         }

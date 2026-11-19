@@ -108,6 +108,13 @@ fn keep_transparent(w: &WebviewWindow) {
         // its page covers it.)
         let _ = SetClassLongPtrW(hwnd(w), GCLP_HBRBACKGROUND, GetStockObject(BLACK_BRUSH).0 as isize);
         let empty = CreateRectRgn(0, 0, -1, -1);
+        // Windows 11 draws a thin light border round windows, brighter once Pulo is the active
+        // app (a click, the tray menu, Settings): the white arcs at the pill's ends. No border,
+        // and none of its own corner rounding either.
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND};
+        let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
+        let _ = DwmSetWindowAttribute(hwnd(w), DWMWA_BORDER_COLOR, &none as *const _ as _, 4);
+        let _ = DwmSetWindowAttribute(hwnd(w), DWMWA_WINDOW_CORNER_PREFERENCE, &DWMWCP_DONOTROUND as *const _ as _, 4);
         let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: empty, fTransitionOnMaximized: false.into() };
         let _ = DwmEnableBlurBehindWindow(hwnd(w), &bb);
         let _ = windows::Win32::Graphics::Gdi::DeleteObject(empty.into());

@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in Pulo doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Play a song in Spotify
+        2. Open the island
+        3. …
+  - type: input
+    attributes:
+      label: Pulo version
+      description: The release you installed, or the commit if you built it yourself.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Display setup
+      description: Number of monitors and their scaling, if it's about placement or size.
+      placeholder: 2 monitors, 150% and 100%

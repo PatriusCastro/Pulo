@@ -204,6 +204,8 @@ fn open_mixer() {
 fn refresh_island(app: &AppHandle) {
     use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
     let Some(w) = app.get_webview_window("main") else { return };
+    // The page's own background too, in case WebView2 put its default (white) back.
+    let _ = w.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
     thread::spawn(move || {
         for ms in [0, 100, 400] {
             thread::sleep(Duration::from_millis(ms));
@@ -318,32 +320,31 @@ fn set_through(w: &WebviewWindow, through: bool) {
 fn watch_click_through(w: WebviewWindow) {
     use tauri::Emitter;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
-    let (mut through, mut dim) = (false, false);
+    let mut through = false;
     loop {
         let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
         let r = *REGION.lock().unwrap();
         let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
         let over = on && over_pill(&w, r);
         let t = on && r.h <= 36.0 && !key(VK_CONTROL);
-        // A layered window draws nothing (Pulo vanishes) until it has an opacity, and tao
-        // makes it layered without one, some time after set_ignore_cursor_events. Check here.
-        unsafe {
-            let h = hwnd(&w);
-            if GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0
-                && GetLayeredWindowAttributes(h, None, None, None).is_err()
-            {
-                let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-            }
-        }
         if t != through {
             set_through(&w, t);
             through = t;
             let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
         }
-        let d = t && over;
-        if d != dim {
-            dim = d;
-            let _ = w.emit("dim", d);
+        // The window's opacity: faded to 20% while the mouse is over it, to see what's under it.
+        // Faded here, not with CSS opacity in the page: that let whatever was behind the page
+        // show through, white at times. Also, a layered window draws nothing (Pulo vanishes)
+        // until it has an opacity, and tao makes it layered without one. So check every tick.
+        unsafe {
+            let h = hwnd(&w);
+            let want = if t && over { 51u8 } else { 255 };
+            let mut alpha = 0u8;
+            if GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0
+                && (GetLayeredWindowAttributes(h, None, Some(&mut alpha), None).is_err() || alpha != want)
+            {
+                let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), want, LWA_ALPHA);
+            }
         }
         thread::sleep(Duration::from_millis(if on { 50 } else { 500 }));
     }

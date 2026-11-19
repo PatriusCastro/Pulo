@@ -306,7 +306,6 @@ export default function App() {
   const [volume, setVolume] = useState(0);
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
-  const [faded, setFaded] = useState(false); // click-through mode, mouse over the pill
   const [cheerUntil, setCheerUntil] = useState(0);
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
@@ -414,9 +413,8 @@ export default function App() {
         collapseSoon(4000);
       }),
       listen<boolean>("away", (e) => setAway(e.payload)),
-      // Click-through mode (watch_click_through in lib.rs): fade while the mouse is over the
-      // pill, and treat clicks starting to pass through as the mouse leaving.
-      listen<boolean>("dim", (e) => setFaded(e.payload)),
+      // Click-through mode (watch_click_through in lib.rs; it also fades the window): treat
+      // clicks starting to pass through as the mouse leaving.
       listen<boolean>("passthrough", (e) => e.payload && onLeave()),
       listen<Device[]>("devices", (e) => setDevices(e.payload)),
       listen<Device>("device_connected", (e) => {
@@ -1090,7 +1088,7 @@ export default function App() {
 
   return (
     <div
-      className={`island ${mode}${faded ? " faded" : ""}`}
+      className={`island ${mode}`}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onContextMenu={(e) => e.preventDefault()}

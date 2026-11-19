@@ -67,12 +67,52 @@ fn hud(kind: &str, level: f32, flag: bool) {
 
 // ---------- media (System Media Transport Controls) ----------
 
-fn session() -> Option<GlobalSystemMediaTransportControlsSession> {
+fn manager() -> Option<&'static GlobalSystemMediaTransportControlsSessionManager> {
     static MGR: OnceLock<Option<GlobalSystemMediaTransportControlsSessionManager>> = OnceLock::new();
-    MGR.get_or_init(|| GlobalSystemMediaTransportControlsSessionManager::RequestAsync().ok()?.get().ok())
-        .as_ref()?
-        .GetCurrentSession()
-        .ok()
+    MGR.get_or_init(|| GlobalSystemMediaTransportControlsSessionManager::RequestAsync().ok()?.get().ok()).as_ref()
+}
+
+fn session() -> Option<GlobalSystemMediaTransportControlsSession> {
+    manager()?.GetCurrentSession().ok()
+}
+
+static MEDIA_WAKE: OnceLock<Mutex<std::sync::mpsc::Sender<()>>> = OnceLock::new();
+
+fn wake_media() {
+    if let Some(tx) = MEDIA_WAKE.get() {
+        let _ = tx.lock().unwrap().send(());
+    }
+}
+
+/// Re-read the player whenever Windows says something changed (track, play state,
+/// position, current player), instead of asking every second: each read is a
+/// cross-process call into the player. A 30 s backstop covers missed events.
+pub fn watch_media() {
+    use windows::Foundation::TypedEventHandler;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = MEDIA_WAKE.set(Mutex::new(tx));
+    if let Some(m) = manager() {
+        let _ = m.CurrentSessionChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+        let _ = m.SessionsChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+    }
+    let mut hooked = String::new(); // player whose session events we listen to
+    loop {
+        if let Some(s) = session() {
+            let id = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
+            if id != hooked {
+                // ponytail: handlers on the previous player aren't removed; they only cause
+                // an extra re-read. Keep tokens and unregister if players switch a lot.
+                let _ = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+                let _ = s.PlaybackInfoChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+                let _ = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+                hooked = id;
+            }
+        }
+        poll_media();
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+        std::thread::sleep(std::time::Duration::from_millis(60)); // let a burst of events land
+        while rx.try_recv().is_ok() {}
+    }
 }
 
 fn read_art(p: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Result<Vec<u8>> {

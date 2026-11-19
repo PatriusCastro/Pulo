@@ -31,6 +31,11 @@ const TOP_MARGIN: f64 = 6.0;
 const MAX: (f64, f64) = (516.0, 268.0);
 static REGION: Mutex<(f64, f64)> = Mutex::new((200.0, 36.0));
 
+/// Long-lived background thread with a name (shows up in profilers and debuggers).
+fn named(name: &str, f: impl FnOnce() + Send + 'static) {
+    let _ = thread::Builder::new().name(name.into()).spawn(f);
+}
+
 fn hwnd(w: &WebviewWindow) -> HWND {
     HWND(w.hwnd().expect("hwnd").0)
 }
@@ -383,14 +388,14 @@ pub fn run() {
 
             sys::watch_power();
             sys::request_notification_access(); // UI thread: required for the consent prompt
-            thread::spawn(|| sys::watch_downloads());
-            thread::spawn(|| agents::watch());
-            thread::spawn(devices::watch);
-            thread::spawn(eq::run);
+            named("downloads", || drop(sys::watch_downloads()));
+            named("agents", || drop(agents::watch()));
+            named("devices", devices::watch);
+            named("equalizer", eq::run);
 
             // Calendar refresh every 10 minutes.
             let handle = app.handle().clone();
-            thread::spawn(move || loop {
+            named("calendar", move || loop {
                 let url = load_settings(&handle).calendar_url;
                 if !url.is_empty() {
                     let _ = sys::fetch_calendar(&url);
@@ -401,7 +406,7 @@ pub fn run() {
             // ponytail: 1 Hz poll for fullscreen, monitor changes and media (~0% CPU). Switch to
             // ABN_FULLSCREENAPP / WM_DISPLAYCHANGE / SMTC events if this ever shows up in a profile.
             // Also hides on any fullscreen app, even one on a different monitor.
-            thread::spawn(move || {
+            named("tick", move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
                 let mut hidden = true; // window starts hidden; first tick shows it
                 let mut away = false;

@@ -36,7 +36,7 @@ async fn check(app: &AppHandle) -> bool {
 
 pub fn start(app: AppHandle, item: MenuItem<Wry>) {
     let _ = ITEM.set(item);
-    thread::spawn(move || {
+    let _ = thread::Builder::new().name("update".into()).spawn(move || {
         thread::sleep(Duration::from_secs(30)); // don't compete with startup
         loop {
             block_on(check(&app));

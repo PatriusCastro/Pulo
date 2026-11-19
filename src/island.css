@@ -1,0 +1,991 @@
+:root {
+  --fg: #f5f5f5;
+  --dim: rgba(245, 245, 245, 0.55);
+  --accent: #3ddc84;
+  --chip: rgba(255, 255, 255, 0.1);
+  /* Smooth deceleration, no overshoot: the window region clips anything past the final size. */
+  --morph: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  font: 13px "Segoe UI Variable", "Segoe UI", sans-serif;
+  color: var(--fg);
+}
+
+button {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  border-radius: 999px;
+  cursor: default;
+}
+button:hover {
+  background: var(--chip);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+.accent {
+  color: var(--accent);
+}
+
+/* Sizes must match COLLAPSED / EXPANDED in App.tsx and MAX in lib.rs. */
+/* Hover area covering the pill and the shortcut columns. The window region decides what
+   is actually clickable: just the pill when collapsed, all of it when open. */
+.island {
+  position: fixed;
+  inset: 0;
+}
+/* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
+.side {
+  position: fixed;
+  top: 0;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  opacity: 0;
+  transform: scale(0.85);
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.3s var(--morph);
+}
+.side:first-child {
+  left: 0;
+}
+.side:last-child {
+  right: 0;
+}
+.open > .side {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 0.12s; /* after the pill has mostly grown */
+}
+.shortcut {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #000;
+  color: var(--fg);
+}
+.shortcut:hover {
+  background: #1c1c1e;
+}
+.shortcut:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pill {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 36px;
+  border-radius: 18px;
+  background: #000;
+  overflow: hidden;
+  transition:
+    width 0.34s var(--morph),
+    height 0.34s var(--morph),
+    border-radius 0.34s var(--morph);
+}
+/* Hovering: wider, same height. Quicker than opening, it should feel like a nudge. */
+.pill.peek {
+  width: 360px;
+  transition-duration: 0.26s;
+}
+.pill.open {
+  width: 420px;
+  height: 268px;
+  border-radius: 30px;
+  transition-duration: 0.42s;
+}
+
+/* Layers keep their own fixed size, centered at the top, and crossfade. */
+.layer {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  transform-origin: top center;
+  transition:
+    opacity 0.14s ease,
+    filter 0.14s ease,
+    transform 0.3s var(--morph);
+}
+
+/* collapsed */
+.mini-layer {
+  width: 200px;
+  height: 36px;
+  transition-delay: 0.12s; /* reappear once the pill has mostly shrunk */
+}
+.open .mini-layer,
+.peek .mini-layer {
+  opacity: 0;
+  filter: blur(4px);
+  transition-delay: 0s;
+}
+
+/* peek */
+.peek-layer {
+  width: 360px;
+  height: 36px;
+  opacity: 0;
+  pointer-events: none;
+}
+.peek .peek-layer {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0.08s;
+}
+.peek-layer .hud-text {
+  max-width: 280px;
+}
+.peek-row {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 8px;
+}
+.peek-row button {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.peek-main {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.peek-tag {
+  flex: none;
+  padding: 0 4px;
+  font-weight: 600;
+}
+.dim {
+  color: var(--dim);
+  font-weight: 400;
+}
+.break {
+  color: #5ac8fa;
+}
+.mic-off {
+  display: inline-flex;
+  color: #ff6b5e;
+}
+.mini,
+.hud {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+.mini {
+  justify-content: space-between;
+}
+.slot {
+  width: 24px;
+  display: flex;
+  justify-content: center;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.center {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+/* Each change of the center item (clock -> song title -> clock) fades in once. */
+.center {
+  animation: center-in 0.3s ease;
+}
+.center.flash {
+  font-weight: 500;
+  color: rgba(245, 245, 245, 0.8);
+}
+@keyframes center-in {
+  from {
+    opacity: 0;
+  }
+}
+.mini-art {
+  display: block;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%; /* round in the pill; square (.art) when open */
+  object-fit: cover;
+}
+.mini-art.empty {
+  background: var(--chip);
+}
+.hud {
+  gap: 10px;
+  padding: 0 14px;
+  justify-content: center;
+  animation: pop 0.2s var(--morph);
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+.meter {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--chip);
+  overflow: hidden;
+}
+.meter > div {
+  height: 100%;
+  background: var(--fg);
+  transition: width 0.12s ease;
+}
+.pct {
+  min-width: 34px;
+  text-align: right;
+  color: var(--dim);
+}
+
+/* expanded */
+.panel {
+  width: 420px;
+  height: 268px;
+  padding: 10px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateX(-50%) scale(0.94);
+  pointer-events: none;
+}
+.open .panel {
+  opacity: 1;
+  filter: none;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  transition:
+    opacity 0.24s ease 0.1s,
+    filter 0.24s ease 0.1s,
+    transform 0.42s var(--morph);
+}
+.media {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.art {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex: none;
+}
+.art.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--chip);
+  color: rgba(245, 245, 245, 0.35);
+}
+.meta {
+  flex: 1;
+  min-width: 0;
+}
+.title,
+.sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.sub {
+  color: var(--dim);
+  margin-top: 2px;
+}
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sub-row .sub {
+  min-width: 0;
+}
+.eq {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  margin-top: 2px;
+}
+.eq span {
+  width: 3px;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--accent);
+  transform: scaleY(0.12);
+  transform-origin: bottom;
+}
+/* Collapsed: a small voice-memo style waveform, bars grow from the middle. Moved by JS at
+   ~20 fps (Equalizer fps), never by a CSS animation. */
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.wave span {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: scaleY(0.12);
+}
+.wave.working span {
+  background: #ff9f43;
+}
+/* Expanded: previous / current / next line. The block slides in on each line change. */
+/* Music page: player, position bar, extra controls, lyrics below. */
+.music {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+.music .media {
+  gap: 8px;
+}
+.art.small {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+.icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--dim);
+}
+.icon-btn.on {
+  color: var(--accent);
+}
+/* Now: song, then its position bar with the music page button at its end. */
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.player-row .progress-row {
+  flex: 1;
+}
+.music-open {
+  margin-left: auto;
+}
+.music-open:hover {
+  color: var(--fg);
+}
+.controls .play {
+  width: 40px;
+  height: 40px;
+  background: var(--fg);
+  color: #000;
+}
+.controls .play:hover {
+  background: #fff;
+}
+.progress-row,
+.music-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.time {
+  font-size: 11px;
+  color: var(--dim);
+  min-width: 30px;
+}
+.progress-row .time:last-child {
+  text-align: right;
+}
+.slider {
+  flex: 1;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--fg) var(--pct), rgba(255, 255, 255, 0.18) var(--pct));
+}
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+.slider:disabled::-webkit-slider-thumb {
+  visibility: hidden;
+}
+.slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.slider.volume {
+  max-width: 140px;
+}
+.music-row .icon-btn:last-child {
+  margin-left: auto;
+}
+/* Lyrics mode: the page is the lyrics, the player one row above them. */
+.music.lyrics-mode {
+  flex: 1;
+}
+.lyrics-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* Lines fade in at the top edge and out at the bottom instead of being cut. */
+  mask-image: linear-gradient(to bottom, transparent, #000 8px, #000 calc(100% - 36px), transparent);
+}
+.lyrics-scroll {
+  position: relative; /* offsetTop of each line is measured from here */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 6px 0 120px;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lyric {
+  display: block;
+  text-align: left;
+  border-radius: 6px;
+  margin: 0 -4px;
+  padding: 3px 4px;
+  font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.32);
+  text-wrap: balance;
+  transition: color 0.4s ease;
+}
+.lyric.past {
+  color: rgba(255, 255, 255, 0.48);
+}
+.lyric.now {
+  color: #fff;
+}
+.lyric:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.75);
+}
+.lyric.now:not(:disabled):hover {
+  color: #fff;
+}
+.lyric:disabled {
+  cursor: default;
+}
+/* The cover's colour behind the music page, fading to the island's black at the bottom. */
+.pill {
+  background-color: #000;
+  transition:
+    width 0.34s var(--morph),
+    height 0.34s var(--morph),
+    border-radius 0.34s var(--morph),
+    background-color 0.5s ease;
+}
+.pill.tinted {
+  background-color: var(--tint);
+  background-image: linear-gradient(to bottom, transparent 30%, rgba(0, 0, 0, 0.55));
+}
+.lyrics-none {
+  font-size: 12px;
+  color: var(--dim);
+  text-align: center;
+  padding-top: 8px;
+}
+.lyrics-mode .lyrics-none {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-scroll,
+  .lyric {
+    transition: none;
+  }
+}
+.pet {
+  display: block;
+}
+.pet.happy {
+  animation: hop 0.5s ease-in-out 2; /* runs twice, then stops: no idle cost */
+}
+@keyframes hop {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+.idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+.next-event {
+  margin-top: 6px;
+  max-width: 360px;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.big-clock {
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.controls button {
+  width: 36px;
+  height: 36px;
+}
+.shelf {
+  display: flex;
+  gap: 6px;
+  height: 48px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.item {
+  position: relative;
+  flex: none;
+  width: 92px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--chip);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.item:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.ext {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+}
+.name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item .remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+}
+.item:hover .remove {
+  opacity: 1;
+}
+/* Sits with the status bar at the bottom, so the free space stays in one place. */
+.tab-body > .shelf {
+  margin-top: auto;
+}
+/* A hint, not a feature: low and quiet until there's something on the shelf. */
+.shelf:has(.shelf-empty) {
+  height: 34px;
+}
+.shelf-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: rgba(245, 245, 245, 0.45);
+  font-size: 12px;
+}
+.hud-text {
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* tabs */
+.tabs {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+}
+.tab {
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.tab.on {
+  background: var(--chip);
+  color: var(--fg);
+  font-weight: 600;
+}
+.tab-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* focus */
+/* Fills the space above the quick timer, timer and controls centred in it. */
+.focus {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 6px;
+}
+.ring {
+  position: relative;
+  flex: none;
+  width: 120px;
+  height: 120px;
+}
+.ring circle {
+  fill: none;
+  stroke-width: 5;
+}
+.ring .track {
+  stroke: var(--chip);
+}
+/* Redrawn once a second, no transition: see the note on .dot.working. */
+.ring .progress {
+  stroke: var(--accent);
+  stroke-linecap: round;
+}
+.ring .progress.break {
+  stroke: #5ac8fa;
+}
+.ring-time {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.focus-side {
+  flex: 1;
+  min-width: 0;
+}
+.phase-label {
+  font-size: 18px;
+  font-weight: 600;
+}
+/* One dot per focus round in the cycle: done, current, still to come. */
+.rounds {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+.rounds span:not(.sub) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chip);
+}
+.rounds span.done {
+  background: var(--accent);
+}
+.rounds span.now {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.rounds .sub {
+  margin-left: 6px;
+  font-size: 12px;
+}
+.focus-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 16px;
+}
+.focus-controls button {
+  width: 36px;
+  height: 36px;
+  color: var(--dim);
+}
+.focus-controls button:hover {
+  color: var(--fg);
+}
+.focus-controls .primary {
+  width: auto;
+  gap: 6px;
+  padding: 0 18px 0 14px;
+  margin-right: 4px;
+  background: var(--chip);
+  color: var(--fg);
+  font-weight: 600;
+}
+.focus-controls .primary:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+/* Start / Resume: the one thing to press, in the phase's colour. */
+.focus-controls .primary.go {
+  background: var(--accent);
+  color: #000;
+}
+.focus-controls .primary.go.break {
+  background: #5ac8fa;
+}
+.focus-controls .primary.go:hover {
+  filter: brightness(1.1);
+}
+
+/* agents */
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  font-size: 12px;
+}
+.agent-meta {
+  max-width: 140px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-time {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  color: var(--dim);
+}
+.empty-note {
+  padding-top: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dim);
+}
+.dot.idle {
+  background: var(--dim);
+}
+
+/* recent */
+.recent-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.recent-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.recent-row .recent-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar .chip {
+  padding: 2px 10px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.bar .chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* tools */
+.tools {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.tile {
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 14px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.tile:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.tile.on {
+  background: rgba(61, 220, 132, 0.2);
+  color: var(--accent);
+}
+.tile.warn {
+  background: rgba(255, 107, 94, 0.2);
+  color: #ff6b5e;
+}
+/* Static on purpose: any looping animation keeps WebView2 redrawing every frame
+   (measured ~30% of a core for a pulsing dot). Agents can work for hours. */
+.dot.working {
+  background: #ff9f43;
+}
+.agent-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.agent-title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.more {
+  color: #ff9f43;
+}
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dim);
+}
+.bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dev {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.dev.low,
+.hud-text.low {
+  color: #ff6b5e;
+}
+.batt,
+.timer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.batt.charging {
+  color: var(--accent);
+}
+.timer button {
+  width: 24px;
+  height: 24px;
+}
+.timer .chip {
+  width: auto;
+  padding: 0 10px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.timer .chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill,
+  .layer,
+  .open .panel,
+  .meter > div {
+    transition-duration: 0.01s; /* not "none": transitionend must still fire to shrink the region */
+    transition-delay: 0s;
+  }
+  .hud,
+  .lyrics,
+  .lyric-mini,
+  .center,
+  .pet.happy {
+    animation: none;
+  }
+}

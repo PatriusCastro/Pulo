@@ -1,0 +1,46 @@
+# Push a version tag (e.g. `git tag v0.2.0 && git push origin v0.2.0`) to build the
+# Windows installer and attach it to a draft GitHub release. Publish the draft by hand.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release and upload the installer
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-pulo
+
+      - run: npm ci
+      - run: npm run check
+      - run: cargo test --manifest-path src-pulo/Cargo.toml
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update so installed copies accept it. Contents of
+          # ~/.tauri/pulo-updater.key on the maintainer's PC (no password).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tauriScript: npm run pulo --
+          tagName: ${{ github.ref_name }}
+          releaseName: Pulo ${{ github.ref_name }}
+          releaseBody: See the commits since the last release for what changed.
+          releaseDraft: true # installed copies only see it once you publish it
+          includeUpdaterJson: true # latest.json, which Pulo checks for updates

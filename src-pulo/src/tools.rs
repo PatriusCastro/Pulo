@@ -1,0 +1,273 @@
+//! Quick toggles in the island's Tools tab: dark mode, mic mute, keep awake, lock, empty
+//! Recycle Bin.
+
+use crate::sys::APP;
+use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use tauri::Emitter;
+use windows::{
+    core::{implement, w, Result, PCWSTR},
+    Win32::{
+        Foundation::{LPARAM, WPARAM},
+        Media::Audio::{Endpoints::*, *},
+        System::{Com::*, Power::*, Registry::*},
+        UI::{Shell::SHEmptyRecycleBinW, WindowsAndMessaging::*},
+    },
+};
+
+/// Keep awake, applied by the 1 Hz loop in lib.rs (see hold_awake). Off at every launch.
+pub static AWAKE: AtomicBool = AtomicBool::new(false);
+
+#[derive(Serialize)]
+pub struct State {
+    dark: bool,
+    mic_muted: bool,
+    awake: bool,
+}
+
+const THEME: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+
+fn dark() -> bool {
+    let (mut v, mut n) = (1u32, 4u32);
+    unsafe {
+        let _ = RegGetValueW(HKEY_CURRENT_USER, THEME, w!("AppsUseLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut v as *mut u32 as _), Some(&mut n));
+    }
+    v == 0
+}
+
+/// Same switch as Settings > Personalization > Colors: apps and Windows together.
+fn set_dark(on: bool) {
+    let light = u32::from(!on);
+    unsafe {
+        for name in [w!("AppsUseLightTheme"), w!("SystemUsesLightTheme")] {
+            let _ = RegSetKeyValueW(HKEY_CURRENT_USER, THEME, name, REG_DWORD.0, Some(&light as *const u32 as _), 4);
+        }
+        // Running apps re-read the theme when told it changed.
+        let _ = SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, WPARAM(0), LPARAM(w!("ImmersiveColorSet").as_ptr() as isize), SMTO_ABORTIFHUNG, 200, None);
+    }
+}
+
+/// The default microphone's volume control.
+fn mic() -> Result<IAudioEndpointVolume> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED); // no-op if this thread already has COM
+        let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        en.GetDefaultAudioEndpoint(eCapture, eConsole)?.Activate(CLSCTX_ALL, None)
+    }
+}
+
+fn mic_muted() -> bool {
+    mic().and_then(|m| unsafe { m.GetMute() }).is_ok_and(|b| b.as_bool())
+}
+
+#[implement(IAudioEndpointVolumeCallback)]
+struct MicCb;
+
+impl IAudioEndpointVolumeCallback_Impl for MicCb_Impl {
+    fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> Result<()> {
+        // Also called on every level change, which call apps' auto-gain does constantly:
+        // only pass on a change of mute.
+        static LAST: AtomicBool = AtomicBool::new(false);
+        let muted = unsafe { (*data).bMuted.as_bool() };
+        if LAST.swap(muted, Relaxed) != muted {
+            if let Some(app) = APP.get() {
+                let _ = app.emit("mic", muted);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Follow mute changes from anywhere (Teams, the keyboard, Pulo). Call on a thread that
+/// stays alive, like sys::watch_volume.
+// ponytail: the default mic at startup only, like watch_volume.
+pub fn watch_mic() -> Result<()> {
+    let ep = mic()?;
+    unsafe { ep.RegisterControlChangeNotify(&IAudioEndpointVolumeCallback::from(MicCb))? };
+    std::mem::forget(ep); // keep the registration alive for the life of the process
+    Ok(())
+}
+
+/// Keep the screen on and the PC awake, or stop. The request belongs to the calling
+/// thread, so call it from one that lives as long as the app.
+pub fn hold_awake(on: bool) {
+    let flags = if on { ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED } else { ES_CONTINUOUS };
+    unsafe {
+        SetThreadExecutionState(flags);
+    }
+}
+
+// ---------- speaker volume (music page slider) ----------
+
+fn speakers() -> Result<IAudioEndpointVolume> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        en.GetDefaultAudioEndpoint(eRender, eConsole)?.Activate(CLSCTX_ALL, None)
+    }
+}
+
+/// Master volume of the default speakers, 0..1 (0 when muted).
+#[tauri::command]
+pub async fn volume() -> f32 {
+    speakers()
+        .and_then(|v| unsafe { Ok(if v.GetMute()?.as_bool() { 0.0 } else { v.GetMasterVolumeLevelScalar()? }) })
+        .unwrap_or(0.0)
+}
+
+#[tauri::command]
+pub async fn set_volume(level: f32) {
+    if let Ok(v) = speakers() {
+        unsafe {
+            let _ = v.SetMasterVolumeLevelScalar(level.clamp(0.0, 1.0), std::ptr::null());
+            let _ = v.SetMute(level <= 0.0, std::ptr::null()); // dragging up from 0 unmutes
+        }
+    }
+}
+
+// ---------- system stats (asked for every 2 s while the Tools tab is showing) ----------
+
+#[derive(Serialize)]
+pub struct Stats {
+    cpu: f64,  // percent; -1 on the first call, which has nothing to compare with
+    mem: u32,  // percent in use
+    down: f64, // bytes per second, all physical network adapters
+    up: f64,
+}
+
+/// (when, idle ticks, busy+idle ticks, bytes received, bytes sent) at the previous call.
+static PREV: std::sync::Mutex<Option<(std::time::Instant, u64, u64, u64, u64)>> = std::sync::Mutex::new(None);
+
+fn ticks(t: windows::Win32::Foundation::FILETIME) -> u64 {
+    (t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64
+}
+
+/// Bytes received and sent by physical adapters. Virtual switches and filter drivers
+/// repeat the same traffic, so they're skipped.
+fn net_bytes() -> (u64, u64) {
+    use windows::Win32::NetworkManagement::IpHelper::*;
+    let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+    let mut sum = (0, 0);
+    unsafe {
+        if GetIfTable2(&mut table).is_err() || table.is_null() {
+            return sum;
+        }
+        let rows = std::slice::from_raw_parts((*table).Table.as_ptr(), (*table).NumEntries as usize);
+        for r in rows {
+            let flags = r.InterfaceAndOperStatusFlags._bitfield;
+            let hardware = flags & 1 != 0;
+            let filter = flags & 2 != 0;
+            if hardware && !filter {
+                sum.0 += r.InOctets;
+                sum.1 += r.OutOctets;
+            }
+        }
+        FreeMibTable(table as _);
+    }
+    sum
+}
+
+#[tauri::command]
+pub fn stats() -> Stats {
+    use windows::Win32::System::{SystemInformation::*, Threading::GetSystemTimes};
+    let (mut idle, mut kernel, mut user) = Default::default();
+    let mut mem = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    unsafe {
+        let _ = GetSystemTimes(Some(&mut idle), Some(&mut kernel), Some(&mut user));
+        let _ = GlobalMemoryStatusEx(&mut mem);
+    }
+    let (idle, total) = (ticks(idle), ticks(kernel) + ticks(user)); // kernel time includes idle
+    let (rx, tx) = net_bytes();
+    let now = std::time::Instant::now();
+    let prev = PREV.lock().unwrap().replace((now, idle, total, rx, tx));
+    let mut s = Stats { cpu: -1.0, mem: mem.dwMemoryLoad, down: 0.0, up: 0.0 };
+    if let Some((t0, idle0, total0, rx0, tx0)) = prev {
+        let secs = now.duration_since(t0).as_secs_f64().max(0.001);
+        let busy = total.saturating_sub(total0);
+        if busy > 0 {
+            s.cpu = 100.0 * (1.0 - idle.saturating_sub(idle0) as f64 / busy as f64);
+        }
+        s.down = rx.saturating_sub(rx0) as f64 / secs;
+        s.up = tx.saturating_sub(tx0) as f64 / secs;
+    }
+    s
+}
+
+// ---------- keyboard shortcut ----------
+
+/// False if another app already owns the shortcut.
+pub static HOTKEY_OK: AtomicBool = AtomicBool::new(true);
+
+/// Ctrl+Alt+Space toggles the island. Blocks on this thread's message queue; run on its
+/// own thread (the hotkey belongs to the thread that registered it).
+// ponytail: fixed key. Make it a setting if it clashes for someone.
+pub fn watch_hotkey() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::*;
+    unsafe {
+        if RegisterHotKey(None, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE.0 as u32).is_err() {
+            HOTKEY_OK.store(false, Relaxed);
+            return;
+        }
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if msg.message == WM_HOTKEY {
+                if let Some(app) = APP.get() {
+                    let _ = app.emit("hotkey", ());
+                }
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub fn hotkey_ok() -> bool {
+    HOTKEY_OK.load(Relaxed)
+}
+
+#[tauri::command]
+pub async fn tools_state() -> State {
+    State { dark: dark(), mic_muted: mic_muted(), awake: AWAKE.load(Relaxed) }
+}
+
+/// Fixed list, like `launch`: the webview can only pick one of these.
+#[tauri::command]
+pub async fn tool(action: String) -> State {
+    match action.as_str() {
+        "dark" => set_dark(!dark()),
+        "mic" => {
+            if let Ok(m) = mic() {
+                unsafe {
+                    let muted = m.GetMute().is_ok_and(|b| b.as_bool());
+                    let _ = m.SetMute(!muted, std::ptr::null());
+                }
+            }
+        }
+        "awake" => {
+            AWAKE.fetch_xor(true, Relaxed);
+        }
+        "lock" => unsafe {
+            let _ = windows::Win32::System::Shutdown::LockWorkStation();
+        },
+        // Flags 0: Windows asks for confirmation itself.
+        "empty_bin" => unsafe {
+            let _ = SHEmptyRecycleBinW(None, PCWSTR::null(), 0);
+        },
+        _ => {}
+    }
+    tools_state().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stats_sample_in_range() {
+        assert_eq!(stats().cpu, -1.0); // first call has nothing to compare with
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let s = stats();
+        assert!((0.0..=100.0).contains(&s.cpu), "cpu {}", s.cpu);
+        assert!((1..=100).contains(&s.mem), "mem {}", s.mem);
+        assert!(s.down >= 0.0 && s.up >= 0.0);
+    }
+}

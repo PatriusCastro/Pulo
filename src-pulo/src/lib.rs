@@ -656,10 +656,9 @@ pub fn run() {
                     let fs = fullscreen_app_active();
                     if fs != hidden {
                         hidden = fs;
-                        let cmd = if fs { SW_HIDE } else { SW_SHOWNOACTIVATE };
-                        unsafe {
-                            let _ = ShowWindow(hwnd(&w), cmd);
-                        }
+                        // Through tao, so it knows: shown behind its back, its next style rebuild
+                        // hid the island again. Not focusable, so showing doesn't activate it.
+                        let _ = if fs { w.hide() } else { w.show() };
                     }
                     place(&w); // follows the mouse between screens; no-op when already there
                     // Windows drops the transparency now and then (focus and display changes),

@@ -648,8 +648,11 @@ button:focus-visible {
   opacity: 1;
 }
 /* Sits with the status bar at the bottom, so the free space stays in one place. */
-.tab-body > .shelf {
-  margin-top: auto;
+/* The player (or the clock) sits centred in the room above the shelf, not stuck to the tabs
+   with a hole underneath. */
+.tab-body > .player,
+.tab-body > .idle {
+  margin-block: auto;
 }
 /* A hint, not a feature: low and quiet until there's something on the shelf. */
 .shelf:has(.shelf-empty) {
@@ -704,7 +707,8 @@ button:focus-visible {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 22px;
+  justify-content: center; /* ring and controls as one centred group */
+  gap: 32px;
   padding: 0 6px;
 }
 .ring {
@@ -739,7 +743,6 @@ button:focus-visible {
   letter-spacing: -0.02em;
 }
 .focus-side {
-  flex: 1;
   min-width: 0;
 }
 .phase-label {
@@ -809,6 +812,7 @@ button:focus-visible {
 
 /* agents */
 .agent-list {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -836,7 +840,7 @@ button:focus-visible {
   color: var(--dim);
 }
 .empty-note {
-  padding-top: 48px;
+  margin: auto 0; /* middle of the panel */
   text-align: center;
   font-size: 12px;
   color: var(--dim);

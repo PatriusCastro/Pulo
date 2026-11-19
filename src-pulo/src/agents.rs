@@ -27,7 +27,9 @@ pub struct Session {
     title: String,
     project: String,
     working: bool,
-    last: i64, // ms since epoch of the latest main-chain entry
+    since: i64, // ms since epoch the current turn started; meaningful while working
+    last: i64,  // ms since epoch of the latest main-chain entry
+    model: String,
 }
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -46,6 +48,7 @@ struct Log {
     working: bool,
     since: i64,
     last: i64,
+    model: String,
     counted: HashMap<String, (NaiveDate, u64)>, // message id -> tokens already counted
 }
 
@@ -85,6 +88,10 @@ fn apply(log: &mut Log, v: &Value) -> Option<i64> {
 
     if v["isSidechain"].as_bool() == Some(true) || v["isMeta"].as_bool() == Some(true) {
         return None; // subagent traffic and local command echoes don't change the main state
+    }
+    // "<synthetic>" marks entries Claude Code writes itself, like API errors.
+    if let Some(model) = m["model"].as_str().filter(|s| !s.starts_with('<')) {
+        log.model = model.to_string();
     }
     if let Some(cwd) = v["cwd"].as_str() {
         log.project = cwd.rsplit(['\\', '/']).next().unwrap_or(cwd).to_string();
@@ -148,7 +155,15 @@ impl Tracker {
             .logs
             .values()
             .filter(|l| l.last > cutoff)
-            .map(|l| Session { agent: "Claude", title: l.title.clone(), project: l.project.clone(), working: l.working, last: l.last })
+            .map(|l| Session {
+                agent: "Claude",
+                title: l.title.clone(),
+                project: l.project.clone(),
+                working: l.working,
+                since: l.since,
+                last: l.last,
+                model: l.model.clone(),
+            })
             .collect();
         sessions.sort_by(|a, b| b.last.cmp(&a.last));
         sessions.truncate(5);
@@ -218,9 +233,12 @@ mod tests {
         assert!(log.working);
         assert_eq!(log.project, "pulo");
         // tool call, streamed as two entries for the same message id
-        let tool = format!(r#"{{"type":"assistant","timestamp":"2026-11-18T10:00:05Z","message":{{"id":"m1","stop_reason":"tool_use","content":[],{usage}}}}}"#);
+        let tool = format!(r#"{{"type":"assistant","timestamp":"2026-11-18T10:00:05Z","message":{{"id":"m1","model":"claude-opus-5-5","stop_reason":"tool_use","content":[],{usage}}}}}"#);
         assert_eq!(apply(&mut log, &line(&tool)), None);
         assert_eq!(apply(&mut log, &line(&tool)), None);
+        assert_eq!(log.model, "claude-opus-5-5");
+        apply(&mut log, &line(r#"{"type":"assistant","timestamp":"2026-11-18T10:00:06Z","message":{"model":"<synthetic>","stop_reason":"tool_use"}}"#));
+        assert_eq!(log.model, "claude-opus-5-5"); // Claude Code's own entries don't count as a model
         // subagent traffic counts tokens but not state
         let side = format!(r#"{{"type":"assistant","isSidechain":true,"timestamp":"2026-11-18T10:00:10Z","message":{{"id":"s1","stop_reason":"end_turn",{usage}}}}}"#);
         assert_eq!(apply(&mut log, &line(&side)), None);

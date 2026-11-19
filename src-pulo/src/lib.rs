@@ -2,6 +2,7 @@ mod agents;
 mod devices;
 mod eq;
 mod sys;
+mod tools;
 mod update;
 
 use serde::{Deserialize, Serialize};
@@ -29,7 +30,19 @@ const TOP_MARGIN: f64 = 6.0;
 // The open pill (420 wide, .pill.open in island.css) plus a 48 px shortcut column on
 // each side (.side). Must match EXPANDED in App.tsx.
 const MAX: (f64, f64) = (516.0, 268.0);
-static REGION: Mutex<(f64, f64)> = Mutex::new((200.0, 36.0));
+/// Shortcut buttons that fit in a side column (also MAX_SHORTCUTS in prefs.ts).
+const MAX_SHORTCUTS: u32 = 5;
+
+/// What's drawn and clickable: the pill at its current size, plus the shortcut buttons
+/// beside it (counts are 0 unless the island is open).
+#[derive(Clone, Copy)]
+struct Region {
+    w: f64,
+    h: f64,
+    left: u32,
+    right: u32,
+}
+static REGION: Mutex<Region> = Mutex::new(Region { w: 200.0, h: 36.0, left: 0, right: 0 });
 
 /// Long-lived background thread with a name (shows up in profilers and debuggers).
 fn named(name: &str, f: impl FnOnce() + Send + 'static) {
@@ -45,29 +58,25 @@ fn px(v: f64, s: f64) -> i32 {
 }
 
 /// Clip the window to the pill's shape: rounded like the pill (radius as in island.css),
-/// centered, flush to the top. When open, add a circle per shortcut button (.side,
-/// .shortcut in island.css). Outside this shape the window doesn't exist, so clicks pass
-/// through, and if Windows ever drops the transparency there are no square corners left
-/// to turn white.
+/// centered, flush to the top, plus a circle per shortcut button (.side, .shortcut in
+/// island.css). Outside this shape the window doesn't exist, so clicks pass through, and
+/// if Windows ever drops the transparency there are no square corners left to turn white.
 fn apply_region(w: &WebviewWindow, s: f64) {
     use windows::Win32::Graphics::Gdi::{CombineRgn, CreateEllipticRgn, CreateRoundRectRgn, DeleteObject, RGN_OR};
-    let (rw, rh) = *REGION.lock().unwrap();
-    let open = rw > 420.0; // the expanded size includes the shortcut columns
-    let pill_w = if open { 420.0 } else { rw };
-    let radius = if rh <= 36.0 { rh / 2.0 } else { 30.0 };
+    let r = *REGION.lock().unwrap();
+    let pill_w = r.w.min(MAX.0);
+    let radius = if r.h <= 36.0 { r.h / 2.0 } else { 30.0 };
     let x0 = (px(MAX.0, s) - px(pill_w, s)) / 2;
     unsafe {
         // +1: GDI leaves out the right and bottom edges of round regions.
-        let rgn = CreateRoundRectRgn(x0, 0, x0 + px(pill_w, s) + 1, px(rh, s) + 1, px(radius * 2.0, s), px(radius * 2.0, s));
-        if open {
-            // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
-            for row in 0..4 {
+        let rgn = CreateRoundRectRgn(x0, 0, x0 + px(pill_w, s) + 1, px(r.h, s) + 1, px(radius * 2.0, s), px(radius * 2.0, s));
+        // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
+        for (n, x) in [(r.left, 4.0), (r.right, MAX.0 - 44.0)] {
+            for row in 0..n.min(MAX_SHORTCUTS) {
                 let y = 6.0 + row as f64 * 48.0;
-                for x in [4.0, MAX.0 - 44.0] {
-                    let b = CreateEllipticRgn(px(x, s), px(y, s), px(x + 40.0, s) + 1, px(y + 40.0, s) + 1);
-                    CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
-                    let _ = DeleteObject(b.into());
-                }
+                let b = CreateEllipticRgn(px(x, s), px(y, s), px(x + 40.0, s) + 1, px(y + 40.0, s) + 1);
+                CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
+                let _ = DeleteObject(b.into());
             }
         }
         SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
@@ -135,9 +144,10 @@ fn place(w: &WebviewWindow) {
     keep_transparent(w);
 }
 
+/// The pill's size, and how many shortcut buttons show on each side (0 unless open).
 #[tauri::command]
-fn resize(window: WebviewWindow, w: f64, h: f64) {
-    *REGION.lock().unwrap() = (w, h);
+fn resize(window: WebviewWindow, w: f64, h: f64, left: u32, right: u32) {
+    *REGION.lock().unwrap() = Region { w, h, left, right };
     apply_region(&window, window.scale_factor().unwrap_or(1.0));
     keep_transparent(&window);
 }
@@ -147,6 +157,7 @@ fn resize(window: WebviewWindow, w: f64, h: f64) {
 fn launch(app: AppHandle, target: String) {
     let cmd = match target.as_str() {
         "settings" => return open_settings(&app),
+        "scratchpad" => return open_window(&app, "scratchpad", "Pulo scratchpad", (420.0, 480.0), true),
         "mixer" => return sys::open_mixer(),
         "clipboard" => return sys::open_clipboard(),
         "calculator" => "calc.exe",
@@ -202,28 +213,76 @@ async fn open_path(path: String) {
 
 // ---------- settings (settings.json in the app config folder) ----------
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct Settings {
     #[serde(default)]
     calendar_url: String,
     #[serde(default)]
     lyrics: bool, // opt-in: sends track title/artist/length to lrclib.net
+    #[serde(default)]
+    off: Vec<String>, // features turned off (FEATURES in prefs.ts); everything else is on
+    #[serde(default)]
+    ui: serde_json::Value, // island-only preferences (Prefs in prefs.ts); not read here
 }
 
+/// Features turned off, as last saved. Read by the background loops.
+static OFF: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn on(feature: &str) -> bool {
+    !OFF.lock().unwrap().iter().any(|f| f == feature)
+}
+
+/// Start the watcher thread of every feature that's on and not running yet. Turning a
+/// feature off hides it at once; its thread stops with the next launch.
+// ponytail: watchers block forever in OS waits, so there's no clean stop. Give each a stop
+// flag if leaving one running until restart ever matters.
+fn start_watchers() {
+    static STARTED: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+    let watchers: [(&str, fn()); 4] = [
+        ("downloads", || drop(sys::watch_downloads())),
+        ("agents", || drop(agents::watch())),
+        ("devices", devices::watch),
+        ("equalizer", eq::run),
+    ];
+    let mut started = STARTED.lock().unwrap();
+    for (name, f) in watchers {
+        if on(name) && !started.contains(&name) {
+            started.push(name);
+            named(name, f);
+        }
+    }
+}
+
+/// Save, then tell every window (the island follows changes made in Settings at once).
 fn save_settings(app: &AppHandle, s: &Settings) -> Result<(), String> {
     let path = settings_file(app);
     fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| e.to_string())?;
-    fs::write(&path, serde_json::to_vec_pretty(s).unwrap_or_default()).map_err(|e| e.to_string())
+    fs::write(&path, serde_json::to_vec_pretty(s).unwrap_or_default()).map_err(|e| e.to_string())?;
+    *OFF.lock().unwrap() = s.off.clone();
+    start_watchers();
+    use tauri::Emitter;
+    let _ = app.emit("settings", s.clone());
+    Ok(())
 }
 
 #[tauri::command]
 fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
     let mut s = load_settings(&app);
     s.lyrics = on;
-    save_settings(&app, &s)?;
-    use tauri::Emitter;
-    let _ = app.emit("lyrics_enabled", on);
-    Ok(())
+    save_settings(&app, &s)
+}
+
+/// Save the feature switches and/or the island preferences.
+#[tauri::command]
+fn set_prefs(app: AppHandle, off: Option<Vec<String>>, ui: Option<serde_json::Value>) -> Result<(), String> {
+    let mut s = load_settings(&app);
+    if let Some(off) = off {
+        s.off = off;
+    }
+    if let Some(ui) = ui {
+        s.ui = ui;
+    }
+    save_settings(&app, &s)
 }
 
 /// Synced lyrics for a track, or "" if none. Refuses unless the user opted in.
@@ -275,18 +334,23 @@ fn calendar() -> String {
 }
 
 fn open_settings(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+    open_window(app, "settings", "Pulo settings", (520.0, 640.0), false);
+}
+
+/// Show the window `label` (index.html#label), creating it the first time.
+fn open_window(app: &AppHandle, label: &'static str, title: &'static str, (w, h): (f64, f64), resizable: bool) {
+    if let Some(win) = app.get_webview_window(label) {
+        let _ = win.unminimize();
+        let _ = win.set_focus();
         return;
     }
     // Built off the event-loop thread: creating a webview inside a menu callback can deadlock.
     let app = app.clone();
     thread::spawn(move || {
-        let _ = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("index.html#settings".into()))
-            .title("Pulo settings")
-            .inner_size(480.0, 380.0)
-            .resizable(false)
+        let _ = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(format!("index.html#{label}").into()))
+            .title(title)
+            .inner_size(w, h)
+            .resizable(resizable)
             .center()
             .build();
     });
@@ -352,7 +416,10 @@ pub fn run() {
             agents,
             equalizer,
             set_lyrics,
+            set_prefs,
             lyrics,
+            tools::tools_state,
+            tools::tool,
             autostart_enabled,
             set_autostart
         ])
@@ -388,16 +455,14 @@ pub fn run() {
 
             sys::watch_power();
             sys::request_notification_access(); // UI thread: required for the consent prompt
-            named("downloads", || drop(sys::watch_downloads()));
-            named("agents", || drop(agents::watch()));
-            named("devices", devices::watch);
-            named("equalizer", eq::run);
+            *OFF.lock().unwrap() = load_settings(app.handle()).off;
+            start_watchers();
 
             // Calendar refresh every 10 minutes.
             let handle = app.handle().clone();
             named("calendar", move || loop {
                 let url = load_settings(&handle).calendar_url;
-                if !url.is_empty() {
+                if !url.is_empty() && on("calendar") {
                     let _ = sys::fetch_calendar(&url);
                 }
                 thread::sleep(Duration::from_secs(600));
@@ -408,8 +473,10 @@ pub fn run() {
             // Also hides on any fullscreen app, even one on a different monitor.
             named("tick", move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
+                let _ = tools::watch_mic();
                 let mut hidden = true; // window starts hidden; first tick shows it
                 let mut away = false;
+                let mut awake = false;
                 loop {
                     let fs = fullscreen_app_active();
                     if fs != hidden {
@@ -420,8 +487,18 @@ pub fn run() {
                         }
                     }
                     place(&w); // follows the mouse between screens; no-op when already there
-                    sys::poll_media();
-                    sys::poll_notifications();
+                    if on("media") {
+                        sys::poll_media();
+                    }
+                    if on("notifications") {
+                        sys::poll_notifications();
+                    }
+                    // Keep awake is held by this thread: the request lasts while it's set here.
+                    let want = tools::AWAKE.load(std::sync::atomic::Ordering::Relaxed);
+                    if want != awake {
+                        awake = want;
+                        tools::hold_awake(want);
+                    }
                     if sys::user_away() != away {
                         away = !away;
                         use tauri::Emitter;

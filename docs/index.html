@@ -6,57 +6,168 @@
 <title>Pulo: Dynamic Island for Windows</title>
 <meta name="description" content="Pulo is a free, open-source Dynamic Island for Windows. Hover the top of your screen to peek, click to open.">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
-:root { --bg: #07090c; --ink: #f1f3f4; --ink-2: #9aa3ab; --line: #1d232a; --green: #3ddc84; color-scheme: dark; }
+:root { --bg: #07090c; --bg-2: #0d1116; --ink: #f1f3f4; --ink-2: #9aa3ab; --line: #1d232a; --green: #3ddc84; --orange: #ff9f43; --blue: #5ac8fa; color-scheme: dark; }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; scrollbar-color: #2a323a var(--bg); }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.6 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 ::selection { background: var(--green); color: #000; }
-a { color: inherit; }
+a { color: inherit; text-underline-offset: .2em; }
 :focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
 .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 @media (max-width: 600px) { .wrap { padding: 0 16px; } }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; text-wrap: pretty; }
+svg.i { width: 20px; height: 20px; fill: currentColor; flex: none; }
 
-/* The screen: a wallpaper with the island near its top edge, where Pulo puts it. */
+header { position: sticky; top: 0; z-index: 5; background: rgba(7, 9, 12, .82); backdrop-filter: blur(10px); border-bottom: 1px solid transparent; }
+header .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+header b { font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+header b i { width: 22px; height: 10px; border-radius: 5px; background: #000; box-shadow: inset 0 0 0 1px #2a323a; display: inline-block; }
+header nav { display: flex; gap: 22px; font-size: .92rem; color: var(--ink-2); }
+header nav a { text-decoration: none; } header nav a:hover { color: var(--ink); }
+@media (max-width: 640px) { header nav a:not(:last-child) { display: none; } }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 500; text-decoration: none; background: var(--green); color: #000; transition: filter .2s, background .2s; }
+.btn:hover { filter: brightness(1.1); }
+.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.btn.ghost:hover { background: var(--bg-2); filter: none; }
+.cta { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* Intro */
+.intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: end; padding: 64px 0 32px; }
+h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
+.intro p { color: var(--ink-2); font-size: 1.1rem; margin-bottom: 18px; }
+@media (max-width: 760px) { .intro { grid-template-columns: minmax(0, 1fr); padding-top: 40px; } }
+
+/* The screen: a wallpaper with the live island near its top edge, where Pulo puts it. */
 .screen {
   position: relative; margin-top: 24px; border-radius: 18px; overflow: hidden;
   background: radial-gradient(90% 120% at 20% 0%, #1b4d5c 0%, transparent 60%), radial-gradient(80% 100% at 90% 100%, #4a2a6b 0%, transparent 60%), #0c1420;
   aspect-ratio: 16 / 9; min-height: 340px;
   box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .8);
 }
-/* The live island: Pulo's real interface (island/, built by `npm run site`) in its own
-   520x290 window, scaled down on narrow screens. */
+/* Pulo's real interface (island/, built by `npm run site`) in its own 520x290 window. */
 .island { position: absolute; top: 28px; left: 50%; width: 520px; height: 290px; border: 0; transform: translateX(-50%) scale(var(--s, 1)); transform-origin: top center; background: transparent; color-scheme: normal; }
-.hint { position: absolute; left: 0; right: 0; bottom: 18px; margin: 0; text-align: center; font-size: .92rem; color: rgba(241, 243, 244, .8); }
+.hint { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: .92rem; color: rgba(241, 243, 244, .8); padding: 0 16px; }
 @media (max-width: 600px) { .island { top: 16px; } }
 
-header .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-header b { font-weight: 700; letter-spacing: -.01em; }
-header nav { display: flex; gap: 20px; font-size: .92rem; color: var(--ink-2); }
-header nav a { text-decoration: none; } header nav a:hover { color: var(--ink); }
-.intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: end; padding: 64px 0 32px; }
-h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; margin: 0; text-wrap: balance; }
-.intro p { color: var(--ink-2); font-size: 1.1rem; margin: 0 0 18px; }
-.btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 500; text-decoration: none; background: var(--green); color: #000; transition: filter .2s; }
-.btn:hover { filter: brightness(1.1); }
-.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
-.cta { display: flex; gap: 10px; flex-wrap: wrap; }
-@media (max-width: 760px) { .intro { grid-template-columns: minmax(0, 1fr); padding-top: 40px; } }
+/* Sections */
+section { padding-top: 128px; scroll-margin-top: 40px; }
+.head { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 16px 48px; align-items: end; margin-bottom: 40px; }
+.head h2 { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 700; }
+.head p { color: var(--ink-2); }
+@media (max-width: 760px) { .head { grid-template-columns: minmax(0, 1fr); } section { padding-top: 96px; } }
 
-.facts { margin-top: 96px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
-.facts h2 { font-size: 1.1rem; font-weight: 500; margin: 0 0 10px; }
-.facts ul { margin: 0; padding: 0; list-style: none; color: var(--ink-2); }
-.facts li { padding: 6px 0; border-top: 1px solid var(--line); }
-@media (max-width: 760px) { .facts { grid-template-columns: minmax(0, 1fr); } }
-.privacy { margin-top: 64px; color: var(--ink-2); max-width: 64ch; }
-.privacy b { color: var(--ink); font-weight: 500; }
-footer { margin-top: 96px; padding: 28px 0 40px; border-top: 1px solid var(--line); font-size: .88rem; color: var(--ink-2); }
+/* Rest, peek, open: drawn with the island's own shapes. */
+.states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.state { background: var(--bg-2); border-radius: 16px; padding: 28px 24px 24px; display: flex; flex-direction: column; }
+.stage { height: 150px; display: flex; justify-content: center; align-items: flex-start; }
+.state h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 6px; }
+.state h3 span { color: var(--ink-2); font-weight: 400; }
+.state p { color: var(--ink-2); font-size: .95rem; }
+.d-pill { background: #000; border-radius: 999px; display: flex; align-items: center; gap: 10px; padding: 0 10px; height: 34px; box-shadow: 0 0 0 1px #1a1f25; color: #f5f5f5; font-size: .82rem; white-space: nowrap; }
+.d-art { width: 20px; height: 20px; border-radius: 50%; flex: none; background: linear-gradient(#ff9a5a, #d9482b 60%, #5b1f3a); }
+.d-wave { display: flex; gap: 2px; align-items: center; height: 14px; }
+.d-wave i { width: 2px; border-radius: 1px; background: var(--green); }
+.d-wave.orange i { background: var(--orange); }
+.d-clock { font: 400 .8rem/1 "JetBrains Mono", monospace; }
+.d-dim { color: #8b949b; }
+.d-ctl { display: flex; gap: 8px; }
+.d-ctl svg { width: 14px; height: 14px; fill: #f5f5f5; }
+.d-panel { width: 236px; height: 128px; background: #000; border-radius: 24px; box-shadow: 0 0 0 1px #1a1f25; padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.d-tabs { display: flex; gap: 4px; justify-content: center; font-size: 11px; color: #8b949b; }
+.d-tabs b { color: #fff; background: #1d2228; padding: 1px 6px; border-radius: 6px; font-weight: 500; }
+.d-row { display: flex; align-items: center; gap: 9px; }
+.d-sq { width: 34px; height: 34px; border-radius: 7px; background: linear-gradient(#ff9a5a, #d9482b 60%, #5b1f3a); flex: none; }
+.d-lines { flex: 1; display: grid; gap: 5px; }
+.d-lines i { height: 5px; border-radius: 3px; background: #2a3037; display: block; }
+.d-lines i:first-child { background: #e8e8e8; width: 70%; }
+.d-lines i:last-child { width: 45%; }
+.d-play { width: 20px; height: 20px; border-radius: 50%; background: #f5f5f5; flex: none; }
+.d-bar { height: 3px; border-radius: 2px; background: linear-gradient(90deg, #f5f5f5 38%, #2a3037 38%); }
+.moments { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: var(--ink-2); font-size: .95rem; }
+.moments .d-pill { height: 30px; font-size: .78rem; }
+.moments .d-pill svg { width: 13px; height: 13px; fill: currentColor; }
+@media (max-width: 860px) { .states { grid-template-columns: minmax(0, 1fr); } }
+
+/* Features */
+.features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; }
+.feature { padding: 24px 0; border-top: 1px solid var(--line); }
+.feature svg.i { color: var(--green); margin-bottom: 12px; }
+.feature h3 { font-size: 1.05rem; font-weight: 500; margin-bottom: 4px; }
+.feature p { color: var(--ink-2); font-size: .95rem; }
+@media (max-width: 860px) { .features { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .features { grid-template-columns: minmax(0, 1fr); } }
+
+/* Light / private: two columns of plain rows */
+.duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px; }
+.duo h2 { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 700; margin-bottom: 14px; }
+.duo > div > p { color: var(--ink-2); margin-bottom: 24px; }
+.rows { list-style: none; margin: 0; padding: 0; }
+.rows li { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); }
+.rows b { font-weight: 500; }
+.rows span { color: var(--ink-2); }
+@media (max-width: 860px) { .duo { grid-template-columns: minmax(0, 1fr); gap: 96px; } }
+@media (max-width: 480px) { .rows li { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+/* Install */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; counter-reset: s; }
+.steps li { counter-increment: s; background: var(--bg-2); border-radius: 16px; padding: 24px; }
+.steps li::before { content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: #000; font-weight: 700; font-size: .9rem; margin-bottom: 16px; }
+.steps h3 { font-size: 1.05rem; font-weight: 500; margin-bottom: 4px; }
+.steps p { color: var(--ink-2); font-size: .95rem; }
+.req { margin-top: 20px; color: var(--ink-2); font-size: .92rem; }
+@media (max-width: 760px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+
+/* FAQ */
+.faq { border-top: 1px solid var(--line); }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq summary { cursor: pointer; list-style: none; padding: 18px 40px 18px 0; font-weight: 500; position: relative; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: ""; position: absolute; right: 6px; top: 50%; width: 9px; height: 9px; border-right: 2px solid var(--ink-2); border-bottom: 2px solid var(--ink-2); transform: translateY(-70%) rotate(45deg); transition: transform .2s; }
+.faq details[open] summary::after { transform: translateY(-30%) rotate(-135deg); }
+.faq summary:hover { color: var(--green); }
+.faq details p { color: var(--ink-2); padding: 0 0 20px; max-width: 70ch; }
+
+/* Open source */
+.open { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: center; }
+.open h2 { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.05; letter-spacing: -.03em; font-weight: 700; margin-bottom: 14px; }
+.open p { color: var(--ink-2); margin-bottom: 24px; }
+pre { margin: 0; background: var(--bg-2); border-radius: 16px; padding: 24px; overflow-x: auto; font: 400 .92rem/1.85 "JetBrains Mono", monospace; color: #dfe5e8; }
+pre .c { color: #8a949b; }
+@media (max-width: 860px) { .open { grid-template-columns: minmax(0, 1fr); } }
+
+.final { text-align: center; padding-top: 144px; }
+.final h2 { font-size: clamp(2.25rem, 5.5vw, 3.75rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; margin-bottom: 24px; }
+.final .cta { justify-content: center; }
+
+footer { margin-top: 112px; padding: 28px 0 40px; border-top: 1px solid var(--line); font-size: .88rem; color: var(--ink-2); }
 footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
-@media (prefers-reduced-motion: reduce) { .island[aria-expanded="true"] .open { animation: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 </style>
 </head>
 <body>
-<header><div class="wrap"><b>Pulo</b><nav><a href="#more">Features</a><a href="https://github.com/PatriusCastro/Pulo">GitHub</a></nav></div></header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3z"/></symbol>
+  <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h7v2H4zm14-4v4.3a2 2 0 1 0 2 1.7V15h2v-2z"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></symbol>
+  <symbol id="i-shelf" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4h-2v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></symbol>
+  <symbol id="i-head" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h2a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z"/></symbol>
+  <symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></symbol>
+  <symbol id="i-calc" viewBox="0 0 24 24"><path d="M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 3v4h10V5zm0 7v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10 12 8.5-6L6 6z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z"/></symbol>
+</svg>
+
+<header><div class="wrap"><b><i aria-hidden="true"></i>Pulo</b><nav><a href="#how">How it works</a><a href="#features">Features</a><a href="#install">Install</a><a href="https://github.com/PatriusCastro/Pulo">GitHub</a></nav></div></header>
+
 <main class="wrap">
   <div class="intro">
     <h1>Your screen's new top edge.</h1>
@@ -67,19 +178,125 @@ footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; g
   </div>
 
   <div class="screen">
-    <iframe class="island" id="island" src="island/index.html" title="Live Pulo island. Hover to peek, click to open, then try the tabs and controls." loading="eager"></iframe>
+    <iframe class="island" id="island" src="island/index.html" title="Live Pulo island. Hover to peek, click to open, then try the tabs and controls."></iframe>
     <p class="hint">Try it: hover the island to peek, click to open. Everything inside works.</p>
   </div>
 
-  <section class="facts" id="more">
-    <div><h2>Listen</h2><ul><li>Any app in Windows media controls</li><li>Seek, shuffle, repeat, volume</li><li>Synced lyrics, click a line to jump</li><li>Live equalizer in the pill</li></ul></div>
-    <div><h2>Get things done</h2><ul><li>Focus timer with rounds and breaks</li><li>Calendar heads-up 15 minutes before</li><li>File shelf; downloads land here</li><li>Claude Code task alerts</li></ul></div>
-    <div><h2>Stay out of the way</h2><ul><li>Ctrl+Alt+Space to open and close</li><li>Follows the screen your mouse is on</li><li>Every feature can be turned off</li><li>No account, no tracking, MIT licensed</li></ul></div>
+  <section id="how">
+    <div class="head">
+      <h2>Three sizes. Zero clutter.</h2>
+      <p>The island stays small until you want more, and grows only as far as you ask.</p>
+    </div>
+    <div class="states">
+      <div class="state">
+        <div class="stage" aria-hidden="true"><div class="d-pill" style="width:150px"><span class="d-art"></span><span class="d-clock" style="flex:1;text-align:center">2:41</span><span class="d-wave"><i style="height:6px"></i><i style="height:12px"></i><i style="height:9px"></i><i style="height:14px"></i><i style="height:7px"></i></span></div></div>
+        <h3>Rest <span>· always there</span></h3>
+        <p>The cover, the time and a live waveform. It turns orange while an AI agent is working.</p>
+      </div>
+      <div class="state">
+        <div class="stage" aria-hidden="true"><div class="d-pill" style="width:230px"><span class="d-art"></span><span style="flex:1;overflow:hidden;text-overflow:ellipsis">Island Time <span class="d-dim">· The Locals</span></span><span class="d-ctl"><svg><use href="#i-prev"/></svg><svg><use href="#i-pause"/></svg><svg><use href="#i-next"/></svg></span></div></div>
+        <h3>Peek <span>· hover</span></h3>
+        <p>The song and its controls. During a focus round, the time left and a pause button.</p>
+      </div>
+      <div class="state">
+        <div class="stage" aria-hidden="true"><div class="d-panel"><div class="d-tabs"><b>Now</b><span>Recent</span><span>Focus</span><span>Agents</span><span>Tools</span></div><div class="d-row"><span class="d-sq"></span><span class="d-lines"><i></i><i></i></span><span class="d-play"></span></div><div class="d-bar"></div></div></div>
+        <h3>Open <span>· click or Ctrl+Alt+Space</span></h3>
+        <p>Five tabs: music, recent activity, focus timer, agents and quick tools, with your shortcuts on either side.</p>
+      </div>
+    </div>
+    <div class="moments">
+      <span>It also speaks up on its own:</span>
+      <span class="d-pill"><svg><use href="#i-volume"/></svg>Volume 60%</span>
+      <span class="d-pill"><svg><use href="#i-dl"/></svg>report.pdf</span>
+      <span class="d-pill"><svg><use href="#i-head"/></svg>Low · 12%</span>
+      <span class="d-pill" style="color:var(--orange)"><svg><use href="#i-agent"/></svg><span style="color:#f5f5f5">Claude finished</span></span>
+    </div>
   </section>
 
-  <p class="privacy"><b>Private by default.</b> Pulo only goes online to look up lyrics (song title, artist and length, sent to lrclib.net), to read your calendar link, and to check for updates.</p>
+  <section id="features">
+    <div class="head">
+      <h2>Everything at the top. Nothing in the way.</h2>
+      <p>Each one can be switched off in Settings if you don't need it.</p>
+    </div>
+    <div class="features">
+      <div class="feature"><svg class="i"><use href="#i-music"/></svg><h3>Now playing</h3><p>Spotify, your browser, anything that uses Windows media controls. Seek, shuffle, repeat and volume.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-lyrics"/></svg><h3>Synced lyrics</h3><p>Big lines in time with the song, tinted by the cover. Click a line to jump to it.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-timer"/></svg><h3>Focus timer</h3><p>Pomodoro rounds with short and long breaks, plus 1 to 25 minute quick timers.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-shelf"/></svg><h3>File shelf</h3><p>Drop files on the island to keep them close. Finished downloads land here too.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-bell"/></svg><h3>Calendar</h3><p>Your next event, and a heads-up 15 minutes before. Paste any iCal link.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-head"/></svg><h3>Batteries</h3><p>Laptop, Bluetooth headphones, mouse and keyboard, with a warning when one runs low.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-agent"/></svg><h3>Claude Code</h3><p>See which sessions are working, and get a nudge when a long task finishes.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-moon"/></svg><h3>Quick tools</h3><p>Dark mode, mic mute, keep awake, lock, empty the bin, a scratchpad, CPU and memory.</p></div>
+      <div class="feature"><svg class="i"><use href="#i-calc"/></svg><h3>Shortcuts</h3><p>Up to five buttons on each side: Calculator, Screenshot, Task Manager and more.</p></div>
+    </div>
+  </section>
+
+  <section class="duo">
+    <div>
+      <h2>Light by design.</h2>
+      <p>It's always on screen, so it was built to cost almost nothing.</p>
+      <ul class="rows">
+        <li><b>No polling</b><span>Windows says when something changes; Pulo doesn't keep asking.</span></li>
+        <li><b>Still at rest</b><span>No looping animations. The waveform only runs while music plays.</span></li>
+        <li><b>Only what you use</b><span>Switch a feature off and it disappears at once; its background work stops from the next start.</span></li>
+        <li><b>Out of the way</b><span>Hides itself during full-screen games, videos and presentations.</span></li>
+      </ul>
+    </div>
+    <div>
+      <h2>Private by default.</h2>
+      <p>No account, no tracking. Only three things ever go online:</p>
+      <ul class="rows">
+        <li><b>Lyrics</b><span>The song's title, artist and length, sent to lrclib.net. Can be turned off.</span></li>
+        <li><b>Calendar</b><span>The iCal link you paste, read every 10 minutes.</span></li>
+        <li><b>Updates</b><span>A check for new versions on GitHub. Updates are signed.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="head">
+      <h2>Up and running in a minute.</h2>
+      <p>Free, with no sign-up. It updates itself after that.</p>
+    </div>
+    <ol class="steps">
+      <li><h3>Download</h3><p>Get the installer from the latest release on GitHub.</p></li>
+      <li><h3>Run it</h3><p>If Windows says it doesn't know the publisher, choose More info, then Run anyway.</p></li>
+      <li><h3>Look up</h3><p>The island appears at the top of the screen your mouse is on.</p></li>
+    </ol>
+    <p class="req">Windows 10 (version 2004 or newer) or Windows 11.</p>
+  </section>
+
+  <section id="faq">
+    <div class="head"><h2>Questions</h2></div>
+    <div class="faq">
+      <details><summary>Which music apps work?</summary><p>Any app that shows up in the Windows media controls: Spotify, Apple Music, YouTube and other sites in Chrome or Edge, and most players.</p></details>
+      <details><summary>Will it slow my PC down?</summary><p>It's built not to. It waits for Windows to report changes instead of checking constantly, it has no looping animations, and features you switch off stop running in the background from the next start.</p></details>
+      <details><summary>I have more than one monitor.</summary><p>The island shows on whichever screen your mouse is on, and handles different scaling on each one.</p></details>
+      <details><summary>Will it get in the way of games and videos?</summary><p>No. It hides itself while a full-screen app, game or presentation is running, and comes back when you leave it.</p></details>
+      <details><summary>Where do the lyrics come from?</summary><p>From lrclib.net, a free, community-run lyrics library. Pulo sends only the song's title, artist and length. You can turn lyrics off in Settings.</p></details>
+      <details><summary>Is there a Mac version?</summary><p>No. Pulo is made for Windows.</p></details>
+    </div>
+  </section>
+
+  <section class="open" id="contribute">
+    <div>
+      <h2>Built in the open.</h2>
+      <p>Pulo is MIT licensed: Rust and Tauri underneath, React for the island. Bug reports, ideas and pull requests are welcome.</p>
+      <div class="cta"><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo/blob/main/CONTRIBUTING.md">Contributing guide</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo/issues/new/choose">Report a bug</a></div>
+    </div>
+    <pre><code><span class="c"># Node 22+ and Rust</span>
+git clone https://github.com/PatriusCastro/Pulo
+cd Pulo
+npm install
+npm start   <span class="c"># the island, with hot reload</span></code></pre>
+  </section>
+
+  <section class="final">
+    <h2>Give your screen an edge.</h2>
+    <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a></div>
+  </section>
 </main>
-<footer><div class="wrap"><span>Pulo · Windows 10 (2004+) and 11</span><span><a href="https://github.com/PatriusCastro/Pulo/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="https://github.com/PatriusCastro/Pulo/issues">Report a bug</a></span></div></footer>
+<footer><div class="wrap"><span>Pulo · MIT License · Not affiliated with Apple or Microsoft</span><span><a href="https://github.com/PatriusCastro/Pulo">GitHub</a> · <a href="https://github.com/PatriusCastro/Pulo/blob/main/SECURITY.md">Security</a></span></div></footer>
 <script>
 // Shrink the 520px island window to fit narrow screens.
 const island = document.getElementById("island");

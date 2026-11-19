@@ -65,10 +65,19 @@ setInterval(() => {
 }, 500);
 
 // Live levels for the equalizer, as Rust sends while capturing audio.
+// Each bar eases toward a new level a few times a second, so it reads as music, not noise.
 let eqTimer: number | undefined;
+const bars = [0.4, 0.4, 0.4, 0.4, 0.4];
+const goal = [0.4, 0.4, 0.4, 0.4, 0.4];
+let frame = 0;
 function equalizer(on: boolean, fps = 30) {
   clearInterval(eqTimer);
-  if (on) eqTimer = window.setInterval(() => emit("eq", [0, 1, 2, 3, 4].map(() => (playing ? 0.15 + Math.random() * 0.85 : 0))), 1000 / Math.min(fps, 30));
+  if (!on) return;
+  eqTimer = window.setInterval(() => {
+    if (frame++ % 6 === 0) goal.forEach((_, k) => (goal[k] = playing ? 0.2 + Math.random() * 0.7 : 0));
+    bars.forEach((v, k) => (bars[k] = v + (goal[k] - v) * 0.18));
+    emit("eq", [...bars]);
+  }, 1000 / Math.min(fps, 30));
 }
 
 async function cover(c: string[]) {

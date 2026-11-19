@@ -98,6 +98,36 @@ export default function Settings() {
           />
           Start Pulo with Windows
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={!!saved.click_through}
+            aria-describedby="through-help"
+            onChange={(e) => {
+              setSaved((s) => ({ ...s, click_through: e.target.checked }));
+              invoke("set_window", { clickThrough: e.target.checked });
+            }}
+          />
+          Click through the island
+        </label>
+        <p id="through-help" className="help indent">
+          Clicks go to whatever is under the closed island, like your browser's tabs, and it fades while the mouse is over it. Hold Ctrl to use the island, or press Ctrl+Alt+Space.
+        </p>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={!!saved.show_in_screenshots}
+            aria-describedby="capture-help"
+            onChange={(e) => {
+              setSaved((s) => ({ ...s, show_in_screenshots: e.target.checked }));
+              invoke("set_window", { showInScreenshots: e.target.checked });
+            }}
+          />
+          Show the island in screenshots
+        </label>
+        <p id="capture-help" className="help indent">
+          Off: screenshots, screen recordings and screen sharing leave it out.
+        </p>
         <fieldset className="radio">
           <legend>Open the island</legend>
           <label className="check">

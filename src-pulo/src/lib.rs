@@ -223,6 +223,78 @@ struct Settings {
     off: Vec<String>, // features turned off (FEATURES in prefs.ts); everything else is on
     #[serde(default)]
     ui: serde_json::Value, // island-only preferences (Prefs in prefs.ts); not read here
+    #[serde(default)]
+    click_through: bool, // at rest, clicks go to what's under the island (watch_click_through)
+    #[serde(default)]
+    show_in_screenshots: bool, // off: hidden from screenshots, recordings and screen sharing
+}
+
+// ---------- click-through and screenshots ----------
+
+static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn apply_window_settings(app: &AppHandle, s: &Settings) {
+    CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
+    if let Some(w) = app.get_webview_window("main") {
+        let a = if s.show_in_screenshots { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+        unsafe {
+            let _ = SetWindowDisplayAffinity(hwnd(&w), a);
+        }
+    }
+}
+
+/// Whether the mouse is over the pill itself (not the transparent rest of the window).
+fn over_pill(w: &WebviewWindow, r: Region) -> bool {
+    let s = w.scale_factor().unwrap_or(1.0);
+    let (mut c, mut win) = (Default::default(), RECT::default());
+    unsafe {
+        let _ = GetCursorPos(&mut c);
+        let _ = GetWindowRect(hwnd(w), &mut win);
+    }
+    let x0 = win.left + (px(MAX.0, s) - px(r.w, s)) / 2;
+    (x0..x0 + px(r.w, s)).contains(&c.x) && (win.top..win.top + px(r.h, s)).contains(&c.y)
+}
+
+/// Let clicks through the whole window (layered + transparent), or take them again.
+fn set_through(w: &WebviewWindow, on: bool) {
+    let bits = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize;
+    unsafe {
+        let h = hwnd(w);
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        SetWindowLongPtrW(h, GWL_EXSTYLE, if on { ex | bits } else { ex & !bits });
+        if on {
+            // A layered window draws nothing until it has an opacity.
+            let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+        }
+    }
+    keep_transparent(w);
+}
+
+/// Click-through mode: at rest (or peeking) the island passes clicks to whatever is under
+/// it, a browser's tabs say, and fades while the mouse is over it. Holding Ctrl makes it
+/// take clicks again, and once open (Ctrl+click or the keyboard shortcut) it works as usual.
+// ponytail: polls at 20 Hz while the mode is on; a low-level mouse hook if that ever shows up.
+fn watch_click_through(w: WebviewWindow) {
+    use tauri::Emitter;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
+    let (mut through, mut dim) = (false, false);
+    loop {
+        let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
+        let r = *REGION.lock().unwrap();
+        let ctrl = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } < 0;
+        let t = on && r.h <= 36.0 && !ctrl;
+        if t != through {
+            through = t;
+            set_through(&w, t);
+            let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
+        }
+        let d = t && over_pill(&w, r);
+        if d != dim {
+            dim = d;
+            let _ = w.emit("dim", d);
+        }
+        thread::sleep(Duration::from_millis(if on { 50 } else { 500 }));
+    }
 }
 
 /// Features turned off, as last saved. Read by the background loops.
@@ -262,6 +334,7 @@ fn save_settings(app: &AppHandle, s: &Settings) -> Result<(), String> {
     fs::write(&path, serde_json::to_vec_pretty(s).unwrap_or_default()).map_err(|e| e.to_string())?;
     *OFF.lock().unwrap() = s.off.clone();
     start_watchers();
+    apply_window_settings(app, s);
     use tauri::Emitter;
     let _ = app.emit("settings", s.clone());
     Ok(())
@@ -271,6 +344,14 @@ fn save_settings(app: &AppHandle, s: &Settings) -> Result<(), String> {
 fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
     let mut s = load_settings(&app);
     s.lyrics = on;
+    save_settings(&app, &s)
+}
+
+#[tauri::command]
+fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>) -> Result<(), String> {
+    let mut s = load_settings(&app);
+    s.click_through = click_through.unwrap_or(s.click_through);
+    s.show_in_screenshots = show_in_screenshots.unwrap_or(s.show_in_screenshots);
     save_settings(&app, &s)
 }
 
@@ -464,7 +545,8 @@ pub fn run() {
             tools::set_volume,
             tools::hotkey_ok,
             autostart_enabled,
-            set_autostart
+            set_autostart,
+            set_window
         ])
         .setup(|app| {
             let _ = sys::APP.set(app.handle().clone());
@@ -478,6 +560,9 @@ pub fn run() {
                 SetWindowLongPtrW(h, GWL_EXSTYLE, ex | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0 as isize);
             }
             place(&w);
+            apply_window_settings(app.handle(), &load_settings(app.handle()));
+            let cw = w.clone();
+            named("click-through", move || watch_click_through(cw));
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let updates = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;

@@ -23,6 +23,9 @@ type Snapshot = { media: Media | null; battery: { percent: number; charging: boo
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
 type Agents = { sessions: Session[]; tokens_today: number };
 type Tools = { dark: boolean; mic_muted: boolean; awake: boolean };
+type Stats = { cpu: number; mem: number; down: number; up: number };
+/** One line in the Recent tab. `path`: a finished download, opened on click. */
+type Recent = { kind: "notification" | "download" | "agent" | "timer" | "focus"; text: string; at: number; path?: string };
 type Hud = {
   kind: "volume" | "brightness" | "power" | "timer" | "focus" | "download" | "agent" | "notification" | "device" | "mic";
   level: number;
@@ -34,7 +37,7 @@ type Hud = {
 /** rest: the small pill. peek: hovering, a wider pill with the live thing and its controls.
  *  open: clicked, the full panel. */
 type Mode = "rest" | "peek" | "open";
-type Tab = "now" | "focus" | "agents" | "tools";
+type Tab = "now" | "recent" | "focus" | "agents" | "tools";
 
 // Must match .pill, .pill.wide, .pill.peek and .pill.open in island.css (MAX in lib.rs is
 // the open pill plus the shortcut columns).
@@ -46,7 +49,8 @@ const sizeOf = (m: Mode, wide: boolean) => (m === "open" ? EXPANDED : m === "pee
 /** Hover this long before peeking, so passing over the top edge on the way to a tab doesn't. */
 const PEEK_DELAY = 120;
 const PRESETS = [1, 5, 15, 25];
-const TAB_LABEL: Record<Tab, string> = { now: "Now", focus: "Focus", agents: "Agents", tools: "Tools" };
+const TAB_LABEL: Record<Tab, string> = { now: "Now", recent: "Recent", focus: "Focus", agents: "Agents", tools: "Tools" };
+const RECENT_MAX = 20;
 
 const ICONS = {
   prev: "M6 6h2v12H6zm3.5 6 8.5 6V6z",
@@ -130,6 +134,8 @@ const fmtAgo = (ms: number) => {
   const m = Math.floor(ms / 60_000);
   return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
 };
+const fmtRate = (b: number) =>
+  b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB/s` : b >= 1e3 ? `${Math.round(b / 1e3)} KB/s` : `${Math.round(b)} B/s`;
 /** "claude-opus-5-5" -> "Opus 5.5". Dated ids ("claude-opus-4-20250514") drop the date. */
 const shortModel = (id: string) => {
   const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
@@ -211,6 +217,20 @@ export default function App() {
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
   const [pomo, setPomo] = useState<P.Pomo>(() => load("pomodoro", null) ?? P.initial(P.DEFAULTS, Date.now()));
+  const [recent, setRecent] = useState<Recent[]>(() => load("recent", []));
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  // Newest first, kept across restarts.
+  const addRecent = (kind: Recent["kind"], text: string, path?: string) =>
+    setRecent((cur) => {
+      const next = [{ kind, text, at: Date.now(), path }, ...cur].slice(0, RECENT_MAX);
+      save("recent", next);
+      return next;
+    });
+  const clearRecent = () => {
+    setRecent([]);
+    save("recent", []);
+  };
 
   // Newest first, no duplicates, kept across restarts.
   const addToShelf = (paths: string[]) =>
@@ -302,7 +322,17 @@ export default function App() {
       listen<[string, string]>("agent_done", (e) => {
         if (!on("agents")) return;
         cheer();
-        showHud({ kind: "agent", level: 1, flag: false, text: `Claude finished · ${e.payload[0]}` }, 8000);
+        const text = `Claude finished · ${e.payload[0]}`;
+        addRecent("agent", text);
+        showHud({ kind: "agent", level: 1, flag: false, text }, 8000);
+      }),
+      // Keyboard shortcut (Ctrl+Alt+Space): open, or close if open.
+      listen("hotkey", () => {
+        if (!on("hotkey")) return;
+        if (intent.current === "open") return go("rest");
+        go("open");
+        // The mouse may be nowhere near it: close again unless it comes over (onEnter cancels this).
+        collapseSoon(4000);
       }),
       listen<boolean>("away", (e) => setAway(e.payload)),
       listen<Device[]>("devices", (e) => setDevices(e.payload)),
@@ -315,12 +345,16 @@ export default function App() {
           showHud({ kind: "device", level: e.payload.percent / 100, flag: true, text: `Low · ${e.payload.percent}%`, icon: DEVICE_ICON[e.payload.kind] }, 6000);
       }),
       listen<[string, string, string]>("notification", (e) => {
-        const [app, title] = e.payload;
-        if (on("notifications")) showHud({ kind: "notification", level: 1, flag: false, text: [app, title].filter(Boolean).join(" · ") }, 5000);
+        const [app, title, body] = e.payload;
+        if (!on("notifications")) return;
+        const text = [app, title].filter(Boolean).join(" · ");
+        addRecent("notification", body ? `${text} · ${body}` : text);
+        showHud({ kind: "notification", level: 1, flag: false, text }, 5000);
       }),
       listen<string>("download", (e) => {
         if (!on("downloads")) return;
         cheer();
+        addRecent("download", fileName(e.payload), e.payload);
         if (on("shelf")) addToShelf([e.payload]);
         showHud({ kind: "download", level: 1, flag: false, text: fileName(e.payload) }, 4000);
       }),
@@ -426,6 +460,7 @@ export default function App() {
         setTimerEnd(null);
         if (audio.current) chime(audio.current);
         cheer();
+        addRecent("timer", "Timer done");
         showHud({ kind: "timer", level: 1, flag: false, text: "Timer done" }, 6000);
       }
     }, 1000);
@@ -462,7 +497,9 @@ export default function App() {
       setPomo(r.next);
       if (audio.current) chime(audio.current);
       if (r.finished === "focus") cheer();
-      showHud({ kind: "focus", level: 1, flag: false, text: r.finished === "focus" ? "Focus done · take a break" : "Break over · back to focus" }, 6000);
+      const text = r.finished === "focus" ? "Focus done · take a break" : "Break over · back to focus";
+      addRecent("focus", text);
+      showHud({ kind: "focus", level: 1, flag: false, text }, 6000);
     }, 1000);
     return () => clearInterval(id);
   }, [pomo, cfg]);
@@ -529,8 +566,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the counts change
   }, [prefs.left.length, prefs.right.length]);
 
-  const tabs: Tab[] = ["now", ...(focusOn ? ["focus" as const] : []), ...(agentsOn ? ["agents" as const] : []), ...(toolsOn ? ["tools" as const] : [])];
+  const tabs: Tab[] = [
+    "now",
+    "recent",
+    ...(focusOn ? ["focus" as const] : []),
+    ...(agentsOn ? ["agents" as const] : []),
+    ...(toolsOn ? ["tools" as const] : []),
+  ];
   const shown: Tab = tabs.includes(tab) ? tab : "now";
+  // System stats: sampled only while someone is looking at them.
+  const statsVisible = mode === "open" && shown === "tools";
+  useEffect(() => {
+    if (!statsVisible) return;
+    const get = () => invoke<Stats>("stats").then(setStats);
+    get();
+    const id = window.setInterval(get, 2000);
+    return () => clearInterval(id);
+  }, [statsVisible]);
   const pickTab = (t: Tab) => {
     setTab(t);
     save("tab", t);
@@ -798,19 +850,68 @@ export default function App() {
     ["scratchpad", "Scratchpad", ICONS.note, undefined],
   ];
   const toolsTab = (
-    <div className="tools">
-      {tiles.map(([action, label, icon, pressed]) => (
-        <button
-          key={action}
-          className={`tile${pressed ? " on" : ""}${action === "mic" && pressed ? " warn" : ""}`}
-          aria-pressed={pressed}
-          onClick={() => (action === "scratchpad" ? invoke("launch", { target: "scratchpad" }) : runTool(action))}
-        >
-          <Icon d={icon} size={20} />
-          <span>{label}</span>
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="tools">
+        {tiles.map(([action, label, icon, pressed]) => (
+          <button
+            key={action}
+            className={`tile${pressed ? " on" : ""}${action === "mic" && pressed ? " warn" : ""}`}
+            aria-pressed={pressed}
+            onClick={() => (action === "scratchpad" ? invoke("launch", { target: "scratchpad" }) : runTool(action))}
+          >
+            <Icon d={icon} size={20} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="bar mono">
+        <span>
+          CPU {stats && stats.cpu >= 0 ? `${Math.round(stats.cpu)}%` : "–"} · Memory {stats ? `${stats.mem}%` : "–"}
+        </span>
+        <span>{stats && stats.cpu >= 0 ? `↓ ${fmtRate(stats.down)}  ↑ ${fmtRate(stats.up)}` : ""}</span>
+      </div>
+    </>
+  );
+
+  const RECENT_ICON: Record<Recent["kind"], string> = {
+    notification: ICONS.bell,
+    download: ICONS.download,
+    agent: ICONS.agent,
+    timer: ICONS.timer,
+    focus: ICONS.timer,
+  };
+  const recentTab = (
+    <>
+      <div className="recent-list">
+        {recent.length ? (
+          recent.map((r, i) =>
+            r.path ? (
+              <button key={i} className="recent-row" title={r.path} onClick={() => invoke("open_path", { path: r.path })}>
+                <Icon d={RECENT_ICON[r.kind]} size={14} />
+                <span className="recent-text">{r.text}</span>
+                <span className="agent-time">{fmtAgo(now - r.at)}</span>
+              </button>
+            ) : (
+              <div key={i} className="recent-row">
+                <Icon d={RECENT_ICON[r.kind]} size={14} />
+                <span className="recent-text">{r.text}</span>
+                <span className="agent-time">{fmtAgo(now - r.at)}</span>
+              </div>
+            ),
+          )
+        ) : (
+          <div className="empty-note">Notifications, downloads and finished timers show up here</div>
+        )}
+      </div>
+      <div className="bar">
+        <span>{recent.length ? `${recent.length} recent` : ""}</span>
+        {recent.length > 0 && (
+          <button className="chip" onClick={clearRecent}>
+            Clear
+          </button>
+        )}
+      </div>
+    </>
   );
 
   const peekEl = pomoActive ? (
@@ -922,7 +1023,15 @@ export default function App() {
             </div>
           )}
           <div className="tab-body">
-            {shown === "now" ? nowTab : shown === "focus" ? focusTab : shown === "agents" ? agentsTab : toolsTab}
+            {shown === "now"
+              ? nowTab
+              : shown === "recent"
+                ? recentTab
+                : shown === "focus"
+                  ? focusTab
+                  : shown === "agents"
+                    ? agentsTab
+                    : toolsTab}
           </div>
         </div>
       </div>

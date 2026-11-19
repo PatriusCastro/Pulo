@@ -14,6 +14,7 @@ export const FEATURES = [
   ["devices", "Device batteries", "Bluetooth mouse, keyboard and headphones"],
   ["focus", "Focus timer", "Pomodoro rounds and quick timers"],
   ["tools", "Quick tools", "Dark mode, mic mute, keep awake, lock, Recycle Bin"],
+  ["hotkey", "Keyboard shortcut", "Ctrl+Alt+Space opens and closes the island"],
   ["pet", "Pet", "The little sprout in the pill"],
 ] as const;
 export type Feature = (typeof FEATURES)[number][0];

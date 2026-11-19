@@ -238,11 +238,12 @@ fn on(feature: &str) -> bool {
 // flag if leaving one running until restart ever matters.
 fn start_watchers() {
     static STARTED: Mutex<Vec<&str>> = Mutex::new(Vec::new());
-    let watchers: [(&str, fn()); 4] = [
+    let watchers: [(&str, fn()); 5] = [
         ("downloads", || drop(sys::watch_downloads())),
         ("agents", || drop(agents::watch())),
         ("devices", devices::watch),
         ("equalizer", eq::run),
+        ("hotkey", tools::watch_hotkey),
     ];
     let mut started = STARTED.lock().unwrap();
     for (name, f) in watchers {
@@ -420,6 +421,8 @@ pub fn run() {
             lyrics,
             tools::tools_state,
             tools::tool,
+            tools::stats,
+            tools::hotkey_ok,
             autostart_enabled,
             set_autostart
         ])

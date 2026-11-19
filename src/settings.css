@@ -86,7 +86,8 @@ button:disabled {
   color: var(--accent);
 }
 
-.status.error {
+.status.error,
+.warn {
   color: var(--error);
 }
 

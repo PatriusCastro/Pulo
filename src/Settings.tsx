@@ -18,8 +18,10 @@ export default function Settings() {
   const [status, setStatus] = useState<{ text: string; error?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [autostart, setAutostart] = useState(false);
+  const [hotkeyOk, setHotkeyOk] = useState(true);
 
   useEffect(() => {
+    invoke<boolean>("hotkey_ok").then(setHotkeyOk);
     invoke<Saved>("get_settings").then((s) => {
       setSaved(s);
       setUrl(s.calendar_url);
@@ -120,6 +122,7 @@ export default function Settings() {
             </label>
             <p id={`f-${id}`} className="help indent">
               {help}
+              {id === "hotkey" && !hotkeyOk && <span className="warn"> Another app is already using this shortcut, so it won't work until that app lets go of it and Pulo restarts.</span>}
             </p>
             {id === "media" && (
               <>

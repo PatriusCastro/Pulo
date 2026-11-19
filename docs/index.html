@@ -1,549 +1,91 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pulo: the smallest island on Windows</title>
-<meta name="description" content="Pulo is a free, open-source Dynamic Island for Windows: music, lyrics, meetings, downloads and a focus timer in a little pill at the top of your screen.">
-<meta property="og:title" content="Pulo: the smallest island on Windows">
-<meta property="og:description" content="A free, open-source Dynamic Island for Windows. Population: one song, one meeting, and whatever you just downloaded.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='10' width='28' height='12' rx='6' fill='%23101c1b'/%3E%3Ccircle cx='9' cy='16' r='3' fill='%233ddc84'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Gloock&family=Hanken+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<title>Pulo: Dynamic Island for Windows</title>
+<meta name="description" content="Pulo is a free, open-source Dynamic Island for Windows. Hover the top of your screen to peek, click to open.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-:root {
-  --sand: #f3ead9;
-  --sand-2: #eadcc3;
-  --ink: #102120;
-  --ink-2: #3c4f4c;
-  --sea: #0f5f59;
-  --coral: #d9482b;
-  --coral-ink: #fff8f0;
-  --pill: #050707;
-  --green: #3ddc84;
-  --line: rgba(16, 33, 32, .16);
-  --screen: #183a37;
-  --code: #102120;
-  --code-ink: #e9f3ef;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --sand: #0d1918; --sand-2: #132422; --ink: #f1e8d6; --ink-2: #b4c2bd; --sea: #5cc6b9;
-    --coral: #ff6a4a; --coral-ink: #1a0a05; --line: rgba(241, 232, 214, .16); --screen: #0a2a27;
-    --code: #050c0b; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --sand: #0d1918; --sand-2: #132422; --ink: #f1e8d6; --ink-2: #b4c2bd; --sea: #5cc6b9;
-  --coral: #ff6a4a; --coral-ink: #1a0a05; --line: rgba(241, 232, 214, .16); --screen: #0a2a27;
-  --code: #050c0b; color-scheme: dark;
-}
-
+:root { --bg: #07090c; --ink: #f1f3f4; --ink-2: #9aa3ab; --line: #1d232a; --green: #3ddc84; color-scheme: dark; }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scrollbar-color: var(--sea) var(--sand-2); }
-body {
-  margin: 0;
-  background: var(--sand);
-  color: var(--ink);
-  font: 400 1.0625rem/1.6 "Hanken Grotesk", system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-::selection { background: var(--coral); color: var(--coral-ink); }
-a { color: inherit; text-underline-offset: .2em; text-decoration-thickness: 1px; }
-a:hover { text-decoration-thickness: 2px; }
-:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 4px; }
-h1, h2, h3 { font-family: Gloock, Georgia, serif; font-weight: 400; line-height: 1.05; letter-spacing: -.02em; text-wrap: balance; margin: 0; }
-p { margin: 0; text-wrap: pretty; }
-.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.6 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--green); color: #000; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
 @media (max-width: 600px) { .wrap { padding: 0 16px; } }
-svg.i { width: 1em; height: 1em; fill: currentColor; flex: none; }
 
-/* Header */
-header { padding: 20px 0; }
-header .wrap { display: flex; align-items: center; gap: 24px; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; }
-.brand-mark { width: 30px; height: 14px; border-radius: 7px; background: var(--pill); position: relative; }
-.brand-mark::after { content: ""; position: absolute; left: 4px; top: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-:root[data-theme="dark"] .brand-mark, .brand-mark { box-shadow: 0 0 0 1px var(--line); }
-.brand small { font-weight: 400; color: var(--ink-2); }
-nav { margin-left: auto; display: flex; gap: 22px; font-size: .95rem; }
-nav a { text-decoration: none; color: var(--ink-2); }
-nav a:hover { color: var(--ink); }
-@media (max-width: 760px) { nav a:not(.gh) { display: none; } .brand small { display: none; } }
-
-/* Buttons */
-.btn {
-  display: inline-flex; align-items: center; gap: 10px;
-  padding: 14px 22px; border-radius: 999px; border: 0;
-  font: 700 1rem/1 "Hanken Grotesk", sans-serif; text-decoration: none; cursor: pointer;
-  transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s;
+/* The screen: a wallpaper with the island near its top edge, where Pulo puts it. */
+.screen {
+  position: relative; margin-top: 24px; border-radius: 18px; overflow: hidden;
+  background: radial-gradient(90% 120% at 20% 0%, #1b4d5c 0%, transparent 60%), radial-gradient(80% 100% at 90% 100%, #4a2a6b 0%, transparent 60%), #0c1420;
+  aspect-ratio: 16 / 9; min-height: 340px;
+  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .8);
 }
-.btn.primary { background: var(--coral); color: var(--coral-ink); box-shadow: 0 4px 12px -4px rgba(0, 0, 0, .3); }
-.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 10px 20px -8px rgba(0, 0, 0, .35); }
-.btn.ghost { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
-.btn.ghost:hover { background: var(--ink); color: var(--sand); }
-.btn svg.i { width: 20px; height: 20px; }
+/* The live island: Pulo's real interface (island/, built by `npm run site`) in its own
+   520x290 window, scaled down on narrow screens. */
+.island { position: absolute; top: 28px; left: 50%; width: 520px; height: 290px; border: 0; transform: translateX(-50%) scale(var(--s, 1)); transform-origin: top center; background: transparent; color-scheme: normal; }
+.hint { position: absolute; left: 0; right: 0; bottom: 18px; margin: 0; text-align: center; font-size: .92rem; color: rgba(241, 243, 244, .8); }
+@media (max-width: 600px) { .island { top: 16px; } }
 
-/* Hero */
-.hero { padding-top: 48px; position: relative; }
-.postmark {
-  position: absolute; right: 40px; top: 44px; width: 232px; height: 232px;
-  color: var(--coral); transform: rotate(-11deg);
-}
-.postmark text { font: 400 12.5px "JetBrains Mono", monospace; letter-spacing: 2.6px; fill: currentColor; }
-.postmark .big { font: 400 30px Gloock, Georgia, serif; letter-spacing: 0; }
-.postmark .wavy { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-@media (max-width: 1000px) { .postmark { width: 168px; height: 168px; right: 16px; top: 28px; } }
-@media (max-width: 760px) { .postmark { display: none; } }
-.hero h1 { font-size: clamp(3rem, 8.5vw, 6rem); max-width: 11ch; }
-.hero h1 em { font-style: normal; color: var(--sea); }
-.lede { margin-top: 24px; font-size: clamp(1.125rem, 2vw, 1.375rem); color: var(--ink-2); max-width: 36ch; }
-.cta { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.cta .note { font-size: .9rem; color: var(--ink-2); margin-left: 6px; }
+header .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+header b { font-weight: 700; letter-spacing: -.01em; }
+header nav { display: flex; gap: 20px; font-size: .92rem; color: var(--ink-2); }
+header nav a { text-decoration: none; } header nav a:hover { color: var(--ink); }
+.intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: end; padding: 64px 0 32px; }
+h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; margin: 0; text-wrap: balance; }
+.intro p { color: var(--ink-2); font-size: 1.1rem; margin: 0 0 18px; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 13px 22px; border-radius: 999px; font-weight: 500; text-decoration: none; background: var(--green); color: #000; transition: filter .2s; }
+.btn:hover { filter: brightness(1.1); }
+.btn.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+.cta { display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 760px) { .intro { grid-template-columns: minmax(0, 1fr); padding-top: 40px; } }
 
-/* The postcard: a screen, which is the sea, with the island at the top. */
-.postcard {
-  margin-top: 56px;
-  position: relative;
-  border-radius: 16px 16px 0 0;
-  background:
-    radial-gradient(120% 90% at 50% -10%, rgba(92, 198, 185, .35), transparent 60%),
-    linear-gradient(to bottom, var(--screen), #0b2321);
-  min-height: 400px;
-  padding: 14px 16px 32px;
-  display: flex; flex-direction: column; align-items: center;
-  overflow: hidden;
-}
-.postcard .stamp {
-  position: absolute; right: 22px; bottom: 22px;
-  font: 400 .8rem/1.2 "JetBrains Mono", monospace; color: rgba(233, 243, 239, .55); text-align: right;
-}
-.pill {
-  background: var(--pill); color: #f5f5f5; border: 0; cursor: pointer; text-align: left;
-  font: 400 .95rem/1.3 "Hanken Grotesk", sans-serif;
-  height: 44px; border-radius: 22px;
-  display: flex; align-items: center; gap: 10px; padding: 0 10px;
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .6);
-  transition: width .55s cubic-bezier(.22, 1, .36, 1), height .55s cubic-bezier(.22, 1, .36, 1), border-radius .55s cubic-bezier(.22, 1, .36, 1), padding .55s cubic-bezier(.22, 1, .36, 1);
-  overflow: hidden; white-space: nowrap;
-}
-.pill:hover { box-shadow: 0 14px 36px -10px rgba(0, 0, 0, .75); }
-.pill.open { height: 236px; border-radius: 32px; padding: 18px 20px; align-items: stretch; cursor: default; }
-.pill.open .pill-inner { flex-direction: column; align-items: stretch; gap: 12px; white-space: normal; }
-.o-row { display: flex; align-items: center; gap: 12px; }
-.o-art { width: 48px; height: 48px; border-radius: 10px; flex: none; }
-.o-meta { flex: 1; min-width: 0; line-height: 1.25; }
-.o-meta b { display: block; font-weight: 700; }
-.o-ctl { display: flex; align-items: center; gap: 10px; }
-.o-ctl svg { width: 20px; height: 20px; fill: #f5f5f5; }
-.o-ctl .play { width: 34px; height: 34px; border-radius: 50%; background: #f5f5f5; display: grid; place-items: center; }
-.o-ctl .play svg { fill: #000; width: 18px; height: 18px; }
-.o-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .2); overflow: hidden; }
-.o-bar span { display: block; height: 100%; width: 38%; background: #f5f5f5; border-radius: 2px; }
-.o-lyrics { flex: 1; min-height: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 70%, transparent); }
-.o-lyrics ol { list-style: none; margin: 0; padding: 0; transition: transform .6s cubic-bezier(.22, 1, .36, 1); }
-.o-lyrics li { font: 700 1.3rem/1.2 "Hanken Grotesk", sans-serif; letter-spacing: -.01em; color: rgba(255, 255, 255, .32); padding: 3px 0; transition: color .4s; }
-.o-lyrics li.past { color: rgba(255, 255, 255, .5); }
-.o-lyrics li.now { color: #fff; }
-.pill.open.tinted { background: linear-gradient(to bottom, #5a2216 0%, #2c0f12 100%); }
-.pill-inner { display: flex; align-items: center; gap: 10px; width: 100%; transition: opacity .2s, filter .2s; }
-.pill.swap .pill-inner { opacity: 0; filter: blur(4px); }
-.pill .dot { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; }
-.pill .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.pill .dim { color: #9aa5a3; }
-.pill .tag { font: 400 .85rem/1 "JetBrains Mono", monospace; }
-.art { background: conic-gradient(from 200deg, #ff8a5b, #d9482b, #6b2a5c, #ff8a5b); }
-.wave { display: flex; gap: 2px; align-items: center; height: 16px; }
-.wave span { width: 2.5px; height: 100%; border-radius: 2px; background: var(--green); transform: scaleY(.3); animation: wave .9s ease-in-out infinite alternate; }
-.wave span:nth-child(2) { animation-delay: -.3s; animation-duration: .7s; }
-.wave span:nth-child(3) { animation-delay: -.6s; animation-duration: 1.1s; }
-.wave span:nth-child(4) { animation-delay: -.15s; animation-duration: .8s; }
-.wave span:nth-child(5) { animation-delay: -.45s; animation-duration: .95s; }
-@keyframes wave { to { transform: scaleY(1); } }
-.states { margin-top: auto; padding-top: 36px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-.states button {
-  font: 500 .9rem/1 "Hanken Grotesk", sans-serif; color: #e9f3ef;
-  background: rgba(255, 255, 255, .08); border: 0; border-radius: 999px; padding: 10px 16px; cursor: pointer;
-  transition: background .2s;
-}
-.states button:hover { background: rgba(255, 255, 255, .16); }
-.states button[aria-pressed="true"] { background: #e9f3ef; color: #0b2321; }
-.caption { color: rgba(233, 243, 239, .7); font-size: .9rem; margin-top: 14px; text-align: center; }
-@media (max-width: 600px) { .postcard .stamp { display: none; } .postcard { min-height: 300px; } }
-
-/* Sections */
-section { padding: 112px 0 0; }
-.head { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 24px 64px; align-items: end; margin-bottom: 56px; }
-.head h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); max-width: 16ch; }
-.head p { color: var(--ink-2); max-width: 42ch; padding-bottom: 6px; }
-@media (max-width: 760px) { .head { grid-template-columns: minmax(0, 1fr); } section { padding-top: 80px; } }
-
-/* Itinerary */
-.day { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.day li { display: grid; grid-template-columns: 110px minmax(0, 4fr) minmax(0, 6fr); gap: 8px 40px; padding: 26px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
-.day time { font: 400 .95rem/1 "JetBrains Mono", monospace; color: var(--sea); font-variant-numeric: tabular-nums; }
-.day h3 { font-size: 1.75rem; }
-.mini { margin-top: 14px; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 6px; border-radius: 16px; background: var(--pill); color: #f5f5f5; font-size: .84rem; white-space: nowrap; max-width: 100%; box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .5); }
-.mini .dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #000; flex: none; }
-.mini .dot svg { width: 12px; height: 12px; fill: currentColor; }
-.mini .dim { color: #9aa5a3; }
-.mini .tag { font: 400 .8rem/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
-.mini .lyr { font-weight: 700; }
-.mini .low { color: #ff6b5a; font-weight: 700; }
-.day p { color: var(--ink-2); max-width: 52ch; }
-@media (max-width: 760px) { .day li { grid-template-columns: minmax(0, 1fr); } }
-
-/* Mayor */
-.mayor { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 6fr); gap: 48px; align-items: center; }
-.mayor-portrait { background: var(--sand-2); border-radius: 16px; aspect-ratio: 1; display: grid; place-items: center; position: relative; }
-.mayor-portrait svg { width: 52%; height: auto; }
-.mayor-portrait .sash { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; font: 400 .85rem/1 "JetBrains Mono", monospace; color: var(--ink-2); }
-.mayor h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); margin-bottom: 20px; }
-.mayor p + p { margin-top: 14px; }
-.mayor p { color: var(--ink-2); max-width: 50ch; }
-.moods { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 8px; }
-.moods button { font: 500 .9rem/1 "Hanken Grotesk", sans-serif; color: var(--ink); background: transparent; border: 1.5px solid var(--line); border-radius: 999px; padding: 9px 14px; cursor: pointer; }
-.moods button:hover { border-color: var(--ink); }
-.moods button[aria-pressed="true"] { background: var(--ink); color: var(--sand); border-color: var(--ink); }
-#eyes, #closed, #happy, #zz { transition: opacity .15s; }
-@media (max-width: 760px) { .mayor { grid-template-columns: minmax(0, 1fr); } .mayor-portrait { max-width: 360px; } }
-
-/* Customs */
-.customs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
-.customs div { padding: 24px 28px 0 0; }
-.customs div + div { padding-left: 28px; border-left: 1px solid var(--line); }
-.customs h3 { font-size: 1.5rem; margin-bottom: 8px; }
-.customs p { color: var(--ink-2); font-size: 1rem; }
-.declared { margin-top: 28px; color: var(--ink-2); }
-@media (max-width: 760px) { .customs { grid-template-columns: minmax(0, 1fr); } .customs div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); } .customs div { padding-bottom: 20px; } }
-
-/* Getting there */
-.ticket {
-  background: var(--sea); color: #f3ead9; border-radius: 16px;
-  display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 4fr);
-  overflow: hidden;
-}
-.ticket > div { padding: 44px; }
-.ticket h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); margin-bottom: 16px; }
-.ticket p { color: rgba(243, 234, 217, .95); max-width: 44ch; }
-.ticket .btn.primary { margin-top: 28px; }
-.stub { border-left: 2px dashed rgba(243, 234, 217, .35); font-size: .95rem; }
-.stub dl { margin: 0; display: grid; gap: 16px; }
-.stub dt { font: 400 .78rem/1 "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .08em; color: rgba(243, 234, 217, .88); margin-bottom: 4px; }
-.stub dd { margin: 0; }
-:root[data-theme="dark"] .ticket, :root[data-theme="dark"] .ticket h2 { color: #f3ead9; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ticket { background: #0f5f59; } }
-@media (max-width: 760px) { .ticket { grid-template-columns: minmax(0, 1fr); } .ticket > div { padding: 28px; } .stub { border-left: 0; border-top: 2px dashed rgba(243, 234, 217, .35); } }
-
-/* Build */
-.build { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 48px; align-items: start; }
-.build h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); margin-bottom: 20px; }
-.build > div > p { color: var(--ink-2); max-width: 46ch; }
-.links { list-style: none; padding: 0; margin: 28px 0 0; border-top: 1px solid var(--line); }
-.links a { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-bottom: 1px solid var(--line); text-decoration: none; font-weight: 500; }
-.links a span { color: var(--ink-2); font-weight: 400; font-size: .95rem; }
-.links a:hover { color: var(--sea); }
-pre {
-  margin: 0; background: var(--code); color: var(--code-ink); border-radius: 16px;
-  padding: 24px 26px; overflow-x: auto; font: 400 .95rem/1.8 "JetBrains Mono", monospace;
-}
-pre .c { color: #7f9a94; }
-.rules { margin-top: 24px; color: var(--ink-2); font-size: .98rem; }
-.rules li + li { margin-top: 6px; }
-@media (max-width: 760px) { .build { grid-template-columns: minmax(0, 1fr); } }
-
-footer { margin-top: 128px; padding: 32px 0 48px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .92rem; }
-footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: space-between; }
-
-@media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
-  .wave span { animation: none; transform: scaleY(.7); }
-  .pill, .pill-inner, .btn, .o-lyrics ol { transition: none; }
-}
+.facts { margin-top: 96px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+.facts h2 { font-size: 1.1rem; font-weight: 500; margin: 0 0 10px; }
+.facts ul { margin: 0; padding: 0; list-style: none; color: var(--ink-2); }
+.facts li { padding: 6px 0; border-top: 1px solid var(--line); }
+@media (max-width: 760px) { .facts { grid-template-columns: minmax(0, 1fr); } }
+.privacy { margin-top: 64px; color: var(--ink-2); max-width: 64ch; }
+.privacy b { color: var(--ink); font-weight: 500; }
+footer { margin-top: 96px; padding: 28px 0 40px; border-top: 1px solid var(--line); font-size: .88rem; color: var(--ink-2); }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
+@media (prefers-reduced-motion: reduce) { .island[aria-expanded="true"] .open { animation: none; } }
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z"/></symbol>
-  <symbol id="i-gh" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 2.9.8.1-.7.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></symbol>
-  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
-  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></symbol>
-  <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10 12 8.5-6L6 6z"/></symbol>
-  <symbol id="i-music" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3z"/></symbol>
-  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4h-2v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></symbol>
-  <symbol id="i-timer" viewBox="0 0 24 24"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></symbol>
-  <symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></symbol>
-  <symbol id="i-head" viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h2a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z"/></symbol>
-</svg>
-
-<header>
-  <div class="wrap">
-    <a class="brand" href="#top" aria-label="Pulo, home"><span class="brand-mark" aria-hidden="true"></span>Pulo <small>Tourism Board</small></a>
-    <nav aria-label="Sections">
-      <a href="#itinerary">Things to do</a>
-      <a href="#customs">Island rules</a>
-      <a href="#getting-there">Getting there</a>
-      <a href="#build">Build here</a>
-      <a class="gh" href="https://github.com/PatriusCastro/Pulo">GitHub</a>
-    </nav>
-  </div>
-</header>
-
-<main id="top">
-  <div class="hero wrap">
-    <svg class="postmark" viewBox="0 0 200 200" aria-hidden="true">
-      <defs><path id="ring" d="M100 100m-74 0a74 74 0 1 1 148 0a74 74 0 1 1-148 0"/></defs>
-      <circle cx="100" cy="100" r="94" fill="none" stroke="currentColor" stroke-width="2.5"/>
-      <circle cx="100" cy="100" r="62" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text><textPath href="#ring">PULO ISLAND · POP. 1 SONG · EST. 2026 ·</textPath></text>
-      <rect x="62" y="70" width="76" height="26" rx="13" fill="currentColor"/>
-      <circle cx="76" cy="83" r="5" fill="var(--sand)"/>
-      <text class="big" x="100" y="128" text-anchor="middle">Pulo</text>
-    </svg>
-    <h1>The smallest island on <em>Windows</em>.</h1>
-    <p class="lede">Pulo is a Dynamic Island for your PC. Population: one song, one meeting, and whatever you just downloaded.</p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/PatriusCastro/Pulo/releases/latest"><svg class="i"><use href="#i-dl"/></svg>Download for Windows</a>
-      <a class="btn ghost" href="#build">Help build it</a>
-      <span class="note">Free and open source. No passport needed.</span>
-    </div>
-
-    <div class="postcard" aria-label="Live preview of the island">
-      <button type="button" class="pill" id="pill" aria-expanded="false" aria-label="The island. Click to open it."><span class="pill-inner" id="pill-inner"></span></button>
-      <div class="states" role="group" aria-label="Show the island with">
-        <button type="button" data-state="music" aria-pressed="true">Music</button>
-        <button type="button" data-state="meeting" aria-pressed="false">Next meeting</button>
-        <button type="button" data-state="download" aria-pressed="false">Download</button>
-        <button type="button" data-state="focus" aria-pressed="false">Focus</button>
-        <button type="button" data-state="agent" aria-pressed="false">AI agent</button>
-      </div>
-      <p class="caption" id="caption" aria-live="polite">Wish you were here. Click the island to open it.</p>
-      <p class="stamp" aria-hidden="true">GREETINGS FROM<br>THE TOP OF YOUR SCREEN</p>
+<header><div class="wrap"><b>Pulo</b><nav><a href="#more">Features</a><a href="https://github.com/PatriusCastro/Pulo">GitHub</a></nav></div></header>
+<main class="wrap">
+  <div class="intro">
+    <h1>Your screen's new top edge.</h1>
+    <div>
+      <p>Pulo is a Dynamic Island for Windows. Hover the top of your screen to peek, click to open.</p>
+      <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo">GitHub</a></div>
     </div>
   </div>
 
-  <section id="itinerary">
-    <div class="wrap">
-      <div class="head">
-        <h2>A day on the island</h2>
-        <p>Pulo sits quietly at the top of your screen and speaks up only when something's worth it. Hover to peek, click to open, or press Ctrl+Alt+Space.</p>
-      </div>
-      <ol class="day">
-        <li><time>08:58</time><div><h3>Morning laps</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#ff9f43"><svg><use href="#i-timer"/></svg></span>Focus <span class="tag">24:12</span></span></div><p>A focus timer with rounds, short breaks and a long one. The ring empties as you work. The island won't stop you opening social media, but it will remember.</p></li>
-        <li><time>09:45</time><div><h3>The tide warns you</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#5ac8fa"><svg><use href="#i-bell"/></svg></span>Standup <span class="dim">in 15 min</span></span></div><p>Fifteen minutes before your standup, the island clears its throat. Paste any iCal link: Google, Outlook, whatever you use.</p></li>
-        <li><time>12:30</time><div><h3>Beach karaoke</h3><span class="mini" aria-hidden="true"><span class="dot art"></span><span class="lyr">We live at the top of the screen</span></span></div><p>Synced lyrics in big, bold lines on a background tinted by the album cover. Tap a line to jump there. Works with Spotify, your browser and anything else that talks to Windows media controls.</p></li>
-        <li><time>14:10</time><div><h3>Cargo arrives</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#3ddc84"><svg><use href="#i-dl"/></svg></span>tickets.pdf <span class="dim">saved</span></span></div><p>Finished downloads dock on the shelf. Drop files on the island to keep them handy, then drag them out wherever they need to go.</p></li>
-        <li><time>16:20</time><div><h3>Low tide</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#e9f3ef"><svg><use href="#i-head"/></svg></span>Buds <span class="low">12%</span></span></div><p>Your headphones are at 12%. The island tells you before they do, and it watches your Bluetooth mouse and keyboard too.</p></li>
-        <li><time>17:59</time><div><h3>The agent sails home</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#d97757"><svg><use href="#i-agent"/></svg></span>Agent done <span class="tag dim">4m 12s</span></span></div><p>Claude Code finished that long task you forgot about. The island taps you on the shoulder and shows today's token count.</p></li>
-        <li><time>Any time</time><div><h3>Local amenities</h3></div><p>Dark mode, mic mute, keep awake, lock, the Recycle Bin, system stats, and up to ten shortcuts beside the open island.</p></li>
-      </ol>
-    </div>
+  <div class="screen">
+    <iframe class="island" id="island" src="island/index.html" title="Live Pulo island. Hover to peek, click to open, then try the tabs and controls." loading="eager"></iframe>
+    <p class="hint">Try it: hover the island to peek, click to open. Everything inside works.</p>
+  </div>
+
+  <section class="facts" id="more">
+    <div><h2>Listen</h2><ul><li>Any app in Windows media controls</li><li>Seek, shuffle, repeat, volume</li><li>Synced lyrics, click a line to jump</li><li>Live equalizer in the pill</li></ul></div>
+    <div><h2>Get things done</h2><ul><li>Focus timer with rounds and breaks</li><li>Calendar heads-up 15 minutes before</li><li>File shelf; downloads land here</li><li>Claude Code task alerts</li></ul></div>
+    <div><h2>Stay out of the way</h2><ul><li>Ctrl+Alt+Space to open and close</li><li>Follows the screen your mouse is on</li><li>Every feature can be turned off</li><li>No account, no tracking, MIT licensed</li></ul></div>
   </section>
 
-  <section id="mayor">
-    <div class="wrap mayor">
-      <div class="mayor-portrait">
-        <svg id="pet" viewBox="0 0 24 24" role="img" aria-label="The mayor, a small green sprout">
-          <path id="leaf" d="M12 9c0-3 2-5 5-5-1 3-2.5 4.5-5 5zm0 0c-.5-2.5-2.5-4-5-4 1 2.5 2.5 3.5 5 4z" fill="#3ddc84" opacity=".8"/>
-          <ellipse id="body" cx="12" cy="15.5" rx="9" ry="6.5" fill="#3ddc84"/>
-          <g id="eyes" fill="#000"><circle cx="9" cy="15" r="1.4"/><circle cx="15" cy="15" r="1.4"/></g>
-          <path id="closed" d="M7.5 15h3M13.5 15h3" stroke="#000" stroke-width="1.4" stroke-linecap="round" opacity="0"/>
-          <path id="happy" d="M7.5 15.5l1.5-1.5 1.5 1.5M13.5 15.5l1.5-1.5 1.5 1.5" stroke="#000" stroke-width="1.4" fill="none" stroke-linecap="round" opacity="0"/>
-          <text id="zz" x="18" y="7" font-size="7" fill="currentColor" font-weight="700" opacity="0">z</text>
-        </svg>
-        <p class="sash" id="sash">MAYOR · ELECTED UNOPPOSED</p>
-      </div>
-      <div>
-        <h2>Meet the mayor</h2>
-        <p>A sprout who lives in the pill. Turns orange when an AI agent is working, naps when you step away, and does a little hop when a job is done.</p>
-        <p>The mayor blinks only every few seconds because the island runs on a strict energy budget: no looping animations, nothing polling when Windows can just say what changed.</p>
-        <div class="moods" role="group" aria-label="The mayor's mood">
-          <button type="button" data-mood="idle" aria-pressed="true">Awake</button>
-          <button type="button" data-mood="work" aria-pressed="false">Watching an agent</button>
-          <button type="button" data-mood="sleep" aria-pressed="false">Napping</button>
-          <button type="button" data-mood="happy" aria-pressed="false">Task done</button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="customs">
-    <div class="wrap">
-      <div class="head">
-        <h2>What happens on the island stays on the island</h2>
-        <p>Pulo runs on your PC. No account, no analytics, no tracking. Here is the full customs declaration of what goes online:</p>
-      </div>
-      <div class="customs">
-        <div><h3>Lyrics</h3><p>The song's title, artist and length go to lrclib.net to find synced lyrics. One switch in Settings turns it off.</p></div>
-        <div><h3>Calendar</h3><p>Fetches the iCal link you paste, every 10 minutes. Leave the field empty and it fetches nothing.</p></div>
-        <div><h3>Updates</h3><p>Asks GitHub whether a new version is out. Updates are signed, so the island installs only real ones.</p></div>
-      </div>
-      <p class="declared">Nothing else to declare. The AI agent tracker reads Claude Code's logs on your disk and never sends them anywhere.</p>
-    </div>
-  </section>
-
-  <section id="getting-there">
-    <div class="wrap">
-      <div class="ticket">
-        <div>
-          <h2>Getting there</h2>
-          <p>Download the installer and run it. The island appears at the top of whichever screen your mouse is on, and it updates itself from then on.</p>
-          <a class="btn primary" href="https://github.com/PatriusCastro/Pulo/releases/latest"><svg class="i"><use href="#i-dl"/></svg>Download for Windows</a>
-        </div>
-        <div class="stub">
-          <dl>
-            <div><dt>Destination</dt><dd>Top of your screen</dd></div>
-            <div><dt>Departs from</dt><dd>Windows 10 (2004+) or Windows 11</dd></div>
-            <div><dt>Fare</dt><dd>Free, MIT licensed</dd></div>
-            <div><dt>Boarding note</dt><dd>Windows may say it doesn't know the publisher. Choose More info, then Run anyway. The code is all on GitHub.</dd></div>
-          </dl>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section id="build">
-    <div class="wrap build">
-      <div>
-        <h2>Build a house here</h2>
-        <p>Pulo is open source: Rust and Tauri underneath, React for the island itself. Bug reports, ideas and pull requests are all welcome. Bring a hammer.</p>
-        <ul class="links">
-          <li><a href="https://github.com/PatriusCastro/Pulo/blob/main/CONTRIBUTING.md">Contributing guide <span>Start here</span></a></li>
-          <li><a href="https://github.com/PatriusCastro/Pulo/issues/new?template=bug_report.yml">Report a bug <span>Something sank</span></a></li>
-          <li><a href="https://github.com/PatriusCastro/Pulo/issues/new?template=feature_request.yml">Suggest a feature <span>Plans for the island</span></a></li>
-          <li><a href="https://github.com/PatriusCastro/Pulo">Browse the code <span>GitHub</span></a></li>
-        </ul>
-      </div>
-      <div>
-        <pre><code><span class="c"># You'll need Node 22+ and Rust</span>
-git clone https://github.com/PatriusCastro/Pulo
-cd Pulo
-npm install
-npm start      <span class="c"># the island, with hot reload</span>
-npm run check  <span class="c"># before you open a PR</span></code></pre>
-        <ul class="rules">
-          <li>No looping animations: the island is always on screen, so every frame counts.</li>
-          <li>Every feature can be switched off.</li>
-          <li>Nothing goes online without a line in the customs declaration.</li>
-        </ul>
-      </div>
-    </div>
-  </section>
+  <p class="privacy"><b>Private by default.</b> Pulo only goes online to look up lyrics (song title, artist and length, sent to lrclib.net), to read your calendar link, and to check for updates.</p>
 </main>
-
-<footer>
-  <div class="wrap">
-    <p>The Pulo Tourism Board is a website, not a tourism board. Pulo means "island" in Filipino.</p>
-    <p>Not affiliated with Apple or Microsoft. <a href="https://github.com/PatriusCastro/Pulo/blob/main/LICENSE">MIT License</a>.</p>
-  </div>
-</footer>
-
+<footer><div class="wrap"><span>Pulo · Windows 10 (2004+) and 11</span><span><a href="https://github.com/PatriusCastro/Pulo/blob/main/CONTRIBUTING.md">Contribute</a> · <a href="https://github.com/PatriusCastro/Pulo/issues">Report a bug</a></span></div></footer>
 <script>
-const icon = (id, size = 15) => `<svg class="i" style="width:${size}px;height:${size}px"><use href="#i-${id}"/></svg>`;
-const STATES = {
-  music: { w: 300, caption: "Wish you were here. Click the island to open it.",
-    html: `<span class="dot art"></span><span class="grow">Island Time <span class="dim">· The Locals</span></span><span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>` },
-  meeting: { w: 280, caption: "Fifteen minutes' warning. Enough time for coffee, not enough for a second one.",
-    html: `<span class="dot" style="background:#5ac8fa;color:#000">${icon("bell")}</span><span class="grow">Standup <span class="dim">in 15 min</span></span>` },
-  download: { w: 270, caption: "Your download washed ashore. It's on the shelf.",
-    html: `<span class="dot" style="background:#3ddc84;color:#000">${icon("dl")}</span><span class="grow">tickets.pdf <span class="dim">saved</span></span>` },
-  focus: { w: 220, caption: "Round 2 of 4. The island is guarding your focus.",
-    html: `<span class="dot" style="background:#ff9f43;color:#000">${icon("timer")}</span><span class="grow">Focus</span><span class="tag">18:42</span>` },
-  agent: { w: 300, caption: "Claude Code finished while you were at lunch.",
-    html: `<span class="dot" style="background:#d97757;color:#000">${icon("agent")}</span><span class="grow">Agent done <span class="dim">· pulo</span></span><span class="tag dim">4m 12s</span>` },
-};
-const LYRICS = ["Turn the volume low", "The tide is coming in", "We live at the top of the screen", "Where the notifications swim", "♪", "Hover once, and we're open"];
-const OPEN = `<span class="o-row"><span class="o-art art"></span><span class="o-meta"><b>Island Time</b><span class="dim">The Locals</span></span>
-  <span class="o-ctl" aria-hidden="true">${icon("prev", 20)}<span class="play">${icon("pause", 18)}</span>${icon("next", 20)}</span></span>
-  <span class="o-bar"><span></span></span>
-  <span class="o-lyrics"><ol>${LYRICS.map((l) => `<li>${l}</li>`).join("")}</ol></span>`;
-const pill = document.getElementById("pill"), inner = document.getElementById("pill-inner"), caption = document.getElementById("caption");
-const buttons = [...document.querySelectorAll("[data-state]")];
-const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-let current = "music", open = false, timer, lyricTimer;
-const fit = (w) => Math.min(w, pill.parentElement.clientWidth - 24) + "px";
-function swap(html, after) {
-  pill.classList.add("swap");
-  setTimeout(() => { inner.innerHTML = html; pill.classList.remove("swap"); after?.(); }, still ? 0 : 200);
-}
-function show(name) {
-  setOpen(false, true);
-  current = name;
-  const s = STATES[name];
-  buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.state === name));
-  caption.textContent = s.caption;
-  pill.style.width = fit(s.w);
-  swap(s.html);
-}
-function setLyric(i) {
-  const lines = [...inner.querySelectorAll(".o-lyrics li")];
-  if (!lines.length) return;
-  lines.forEach((l, k) => l.className = k === i ? "now" : k < i ? "past" : "");
-  inner.querySelector(".o-lyrics ol").style.transform = `translateY(${-lines[Math.max(0, i - 1)].offsetTop}px)`;
-}
-function setOpen(on, quiet) {
-  if (on === open) return;
-  open = on;
-  clearInterval(lyricTimer);
-  pill.classList.toggle("open", on);
-  pill.classList.toggle("tinted", on);
-  pill.setAttribute("aria-expanded", on);
-  pill.setAttribute("aria-label", on ? "The island, open on the music page. Click to close it." : "The island. Click to open it.");
-  if (quiet) return;
-  if (on) {
-    clearInterval(timer);
-    current = "music";
-    buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.state === "music"));
-    caption.textContent = "Open: big lyrics, tinted by the album cover. Click again to close.";
-    pill.style.width = fit(440);
-    let i = 1;
-    swap(OPEN, () => { setLyric(i); if (!still) lyricTimer = setInterval(() => setLyric(i = (i + 1) % LYRICS.length), 2400); });
-  } else show("music");
-}
-function tour() {
-  clearInterval(timer);
-  if (still) return;
-  timer = setInterval(() => {
-    const keys = Object.keys(STATES);
-    show(keys[(keys.indexOf(current) + 1) % keys.length]);
-  }, 4200);
-}
-pill.addEventListener("click", () => setOpen(!open));
-buttons.forEach((b) => b.addEventListener("click", () => { show(b.dataset.state); clearInterval(timer); }));
-inner.innerHTML = STATES.music.html;
-pill.style.width = fit(STATES.music.w);
-if (location.hash === "#island") setOpen(true); else tour();
-
-// The mayor's moods, drawn exactly as in the app.
-const parts = Object.fromEntries(["leaf", "body", "eyes", "closed", "happy", "zz"].map((id) => [id, document.getElementById(id)]));
-const sash = document.getElementById("sash");
-const SASH = { idle: "MAYOR · ELECTED UNOPPOSED", work: "MAYOR · SUPERVISING", sleep: "MAYOR · DO NOT DISTURB", happy: "MAYOR · DELIGHTED" };
-let mood = "idle";
-function setMood(m) {
-  mood = m;
-  const colour = m === "work" ? "#ff9f43" : "#3ddc84";
-  parts.leaf.setAttribute("fill", colour);
-  parts.body.setAttribute("fill", colour);
-  parts.eyes.style.opacity = m === "idle" || m === "work" ? 1 : 0;
-  parts.eyes.querySelectorAll("circle").forEach((c, i) => c.setAttribute("cx", m === "work" ? (i ? 16 : 10) : (i ? 15 : 9)));
-  parts.closed.style.opacity = m === "sleep" ? 1 : 0;
-  parts.happy.style.opacity = m === "happy" ? 1 : 0;
-  parts.zz.style.opacity = m === "sleep" ? 1 : 0;
-  sash.textContent = SASH[m];
-  document.querySelectorAll("[data-mood]").forEach((b) => b.setAttribute("aria-pressed", b.dataset.mood === m));
-}
-document.querySelectorAll("[data-mood]").forEach((b) => b.addEventListener("click", () => setMood(b.dataset.mood)));
-(function blink() {
-  setTimeout(() => {
-    if (mood === "idle" || mood === "work") {
-      parts.eyes.style.opacity = 0; parts.closed.style.opacity = 1;
-      setTimeout(() => { if (mood === "idle" || mood === "work") { parts.eyes.style.opacity = 1; parts.closed.style.opacity = 0; } }, 140);
-    }
-    blink();
-  }, 4000 + Math.random() * 4000);
-})();
+// Shrink the 520px island window to fit narrow screens.
+const island = document.getElementById("island");
+const fit = () => island.style.setProperty("--s", Math.min(1, (island.parentElement.clientWidth - 16) / 520));
+addEventListener("resize", fit);
+fit();
 </script>
 </body>
 </html>

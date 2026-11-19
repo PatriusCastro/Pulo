@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulo privacy policy</title>
+<meta name="description" content="What Pulo, the Dynamic Island for Windows, does and doesn't do with your data.">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<meta name="theme-color" content="#07090c">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #07090c; --ink: #f1f3f4; --ink-2: #9aa3ab; --line: #1d232a; --green: #3ddc84; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 1rem/1.65 "Space Grotesk", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-underline-offset: .2em; }
+a:hover { color: var(--green); }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
+main { max-width: 68ch; margin: 0 auto; padding: 32px 24px 80px; }
+@media (max-width: 600px) { main { padding: 24px 16px 64px; } }
+.back { color: var(--ink-2); text-decoration: none; font-size: .92rem; }
+h1 { font-size: clamp(2rem, 5vw, 2.75rem); line-height: 1.1; letter-spacing: -.03em; margin: 28px 0 8px; }
+.date { color: var(--ink-2); margin: 0 0 32px; }
+.lead { font-size: 1.15rem; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; }
+h2 { font-size: 1.2rem; margin: 40px 0 10px; letter-spacing: -.01em; }
+p, li { color: #cfd5da; }
+ul { padding-left: 1.2em; }
+li { margin: 8px 0; }
+b { color: var(--ink); font-weight: 500; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">← Pulo</a>
+  <h1>Privacy policy</h1>
+  <p class="date">Last updated 19 November 2026</p>
+
+  <p class="lead">Pulo has no account, no analytics and no tracking. It doesn't send anything about you to its developer or to anyone else, except in the three cases below, each of which you control.</p>
+
+  <h2>What stays on your PC</h2>
+  <p>To show what it shows, Pulo reads things that never leave your computer:</p>
+  <ul>
+    <li><b>Now playing:</b> the song, artist, album art and playback position that your music app shares with Windows.</li>
+    <li><b>Notifications</b> (Microsoft Store version, only if you allow it): the title and text of new Windows notifications, to show them in the island.</li>
+    <li><b>Downloads:</b> the names of files that finish downloading in your Downloads folder.</li>
+    <li><b>AI agents:</b> Claude Code's session files in your user folder, to tell when a task is running or done.</li>
+    <li><b>Devices, volume, battery and microphone state</b>, from Windows.</li>
+    <li><b>Your settings</b>, recent activity, file shelf and scratchpad, saved in Pulo's folders on your PC.</li>
+  </ul>
+  <p>None of this is uploaded. Turning a feature off in Settings removes it from the island at once, and its background work stops the next time Pulo starts.</p>
+
+  <h2>When Pulo connects to the internet</h2>
+  <ul>
+    <li><b>Lyrics (off unless you turn it on).</b> Pulo asks <a href="https://lrclib.net">lrclib.net</a> for the current song's lyrics, sending its title, artist and length. Nothing else is sent. lrclib.net's own policies apply to that request.</li>
+    <li><b>Calendar (only if you add a link).</b> Pulo downloads the calendar link you paste into Settings every 10 minutes, from whichever service hosts it (for example Google or Outlook). It only reads the calendar.</li>
+    <li><b>Updates (version downloaded from the website).</b> Pulo checks GitHub once a day for a newer version, and only installs it when you choose to. The Microsoft Store version is updated by the Store instead.</li>
+  </ul>
+  <p>Those services see your IP address, as with any internet request.</p>
+
+  <h2>Children</h2>
+  <p>Pulo doesn't collect personal information from anyone, including children.</p>
+
+  <h2>Changes and contact</h2>
+  <p>If this policy changes, the new version will be posted on this page with a new date. Pulo is open source, so you can check everything above in <a href="https://github.com/PatriusCastro/Pulo">its code on GitHub</a>. Questions go to <a href="https://github.com/PatriusCastro/Pulo/issues">GitHub issues</a>.</p>
+</main>
+</body>
+</html>

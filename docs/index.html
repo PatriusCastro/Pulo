@@ -39,7 +39,7 @@ header nav a { text-decoration: none; } header nav a:hover { color: var(--ink); 
 .intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: end; padding: 64px 0 32px; }
 h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
 .intro p { color: var(--ink-2); font-size: 1.1rem; margin-bottom: 18px; }
-@media (max-width: 760px) { .intro { grid-template-columns: minmax(0, 1fr); padding-top: 40px; } }
+@media (max-width: 900px) { .intro { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 40px; } .intro p { max-width: 46ch; } }
 
 /* The screen: a wallpaper with the live island near its top edge, where Pulo puts it. */
 .screen {
@@ -51,7 +51,11 @@ h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.0
 /* Pulo's real interface (island/, built by `npm run site`) in its own 520x290 window. */
 .island { position: absolute; top: 28px; left: 50%; width: 520px; height: 290px; border: 0; transform: translateX(-50%) scale(var(--s, 1)); transform-origin: top center; background: transparent; color-scheme: normal; }
 .hint { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: .92rem; color: rgba(241, 243, 244, .8); padding: 0 16px; }
-@media (max-width: 600px) { .island { top: 16px; } }
+.hint .touch { display: none; }
+@media (hover: none) { .hint .mouse { display: none; } .hint .touch { display: inline; } }
+/* Phones: aspect-ratio plus a min-height would force the screen wider than the phone, so
+   give it a fixed height that fits the scaled island when open. */
+@media (max-width: 600px) { .screen { aspect-ratio: auto; min-height: 0; height: 300px; } .island { top: 16px; } .hint { bottom: 14px; font-size: .85rem; } }
 
 /* Sections */
 section { padding-top: 128px; scroll-margin-top: 40px; }
@@ -90,7 +94,7 @@ section { padding-top: 128px; scroll-margin-top: 40px; }
 .moments { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: var(--ink-2); font-size: .95rem; }
 .moments .d-pill { height: 30px; font-size: .78rem; }
 .moments .d-pill svg { width: 13px; height: 13px; fill: currentColor; }
-@media (max-width: 860px) { .states { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 860px) { .states { grid-template-columns: minmax(0, 1fr); } .stage { height: auto; margin-bottom: 20px; } .state { padding: 24px 20px 20px; } }
 
 /* Features */
 .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; }
@@ -179,7 +183,7 @@ footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; g
 
   <div class="screen">
     <iframe class="island" id="island" src="island/index.html" title="Live Pulo island. Hover to peek, click to open, then try the tabs and controls."></iframe>
-    <p class="hint">Try it: hover the island to peek, click to open. Everything inside works.</p>
+    <p class="hint"><span class="mouse">Try it: hover the island to peek, click to open. Everything inside works.</span><span class="touch">Try it: tap the island to open it. Everything inside works.</span></p>
   </div>
 
   <section id="how">

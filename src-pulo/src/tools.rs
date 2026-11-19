@@ -125,7 +125,7 @@ pub async fn set_volume(level: f32) {
     }
 }
 
-// ---------- system stats (asked for every 2 s while the Tools tab is showing) ----------
+// ---------- system stats (asked for every 2 s while the Now or Tools tab is showing) ----------
 
 #[derive(Serialize)]
 pub struct Stats {
@@ -133,6 +133,56 @@ pub struct Stats {
     mem: u32,  // percent in use
     down: f64, // bytes per second, all physical network adapters
     up: f64,
+    gpu: f64, // percent like Task Manager's; -1 when unknown (first call, or no counters)
+}
+
+/// The "GPU Engine" performance counters Task Manager reads: one instance per process and
+/// engine. Kept open, since a rate needs two samples.
+static GPU_QUERY: std::sync::Mutex<Option<(isize, isize)>> = std::sync::Mutex::new(None);
+
+/// Busiest GPU engine, in percent. Task Manager's GPU figure: sum each engine over all
+/// processes, take the highest.
+fn gpu_percent() -> f64 {
+    use windows::{core::w, Win32::System::Performance::*};
+    let mut q = GPU_QUERY.lock().unwrap();
+    unsafe {
+        if q.is_none() {
+            let (mut query, mut counter) = (PDH_HQUERY::default(), PDH_HCOUNTER::default());
+            if PdhOpenQueryW(None, 0, &mut query) != 0 {
+                return -1.0;
+            }
+            if PdhAddEnglishCounterW(query, w!(r"\GPU Engine(*)\Utilization Percentage"), 0, &mut counter) != 0 {
+                let _ = PdhCloseQuery(query);
+                return -1.0;
+            }
+            let _ = PdhCollectQueryData(query);
+            *q = Some((query.0 as isize, counter.0 as isize));
+            return -1.0;
+        }
+        let (query, counter) = q.unwrap();
+        let (query, counter) = (PDH_HQUERY(query as _), PDH_HCOUNTER(counter as _));
+        if PdhCollectQueryData(query) != 0 {
+            return -1.0;
+        }
+        let (mut size, mut n) = (0u32, 0u32);
+        let _ = PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut size, &mut n, None);
+        if size == 0 {
+            return -1.0;
+        }
+        let mut buf = vec![0u8; size as usize];
+        let items = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
+        if PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut size, &mut n, Some(items)) != 0 {
+            return -1.0;
+        }
+        let mut engines = std::collections::HashMap::<String, f64>::new();
+        for it in std::slice::from_raw_parts(items, n as usize) {
+            // "pid_1234_luid_0x0_0x1_phys_0_eng_3_engtype_3D": the engine is everything after the pid.
+            let name = it.szName.to_string().unwrap_or_default();
+            let engine = name.find("_luid").map_or(name.as_str(), |i| &name[i..]).to_string();
+            *engines.entry(engine).or_default() += it.FmtValue.Anonymous.doubleValue;
+        }
+        engines.values().fold(0.0, |a: f64, &b| a.max(b)).min(100.0)
+    }
 }
 
 /// (when, idle ticks, busy+idle ticks, bytes received, bytes sent) at the previous call.
@@ -180,7 +230,7 @@ pub fn stats() -> Stats {
     let (rx, tx) = net_bytes();
     let now = std::time::Instant::now();
     let prev = PREV.lock().unwrap().replace((now, idle, total, rx, tx));
-    let mut s = Stats { cpu: -1.0, mem: mem.dwMemoryLoad, down: 0.0, up: 0.0 };
+    let mut s = Stats { cpu: -1.0, mem: mem.dwMemoryLoad, down: 0.0, up: 0.0, gpu: gpu_percent() };
     if let Some((t0, idle0, total0, rx0, tx0)) = prev {
         let secs = now.duration_since(t0).as_secs_f64().max(0.001);
         let busy = total.saturating_sub(total0);
@@ -266,8 +316,10 @@ mod tests {
         assert_eq!(stats().cpu, -1.0); // first call has nothing to compare with
         std::thread::sleep(std::time::Duration::from_millis(300));
         let s = stats();
+        eprintln!("cpu {:.0} mem {} gpu {:.0}", s.cpu, s.mem, s.gpu);
         assert!((0.0..=100.0).contains(&s.cpu), "cpu {}", s.cpu);
         assert!((1..=100).contains(&s.mem), "mem {}", s.mem);
         assert!(s.down >= 0.0 && s.up >= 0.0);
+        assert!(s.gpu == -1.0 || (0.0..=100.0).contains(&s.gpu), "gpu {}", s.gpu);
     }
 }

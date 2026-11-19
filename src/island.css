@@ -890,6 +890,10 @@ button:focus-visible {
   align-items: center;
   gap: 10px;
 }
+.usage {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .dev {
   display: inline-flex;
   align-items: center;

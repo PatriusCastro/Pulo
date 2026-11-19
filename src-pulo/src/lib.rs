@@ -248,9 +248,18 @@ static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 fn apply_window_settings(app: &AppHandle, s: &Settings) {
     CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
     if let Some(w) = app.get_webview_window("main") {
+        use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
         let a = if s.show_in_screenshots { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+        let mut cur = Default::default();
         unsafe {
+            // Changing the affinity rebuilds the window's surface without its transparency
+            // (white island), so only touch it on a real change, then restore and repaint.
+            if GetWindowDisplayAffinity(hwnd(&w), &mut cur).is_ok() && cur == a.0 {
+                return;
+            }
             let _ = SetWindowDisplayAffinity(hwnd(&w), a);
+            keep_transparent(&w);
+            let _ = RedrawWindow(Some(hwnd(&w)), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
         }
     }
 }
@@ -581,6 +590,15 @@ pub fn run() {
                 let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
                 SetWindowLongPtrW(h, GWL_EXSTYLE, ex | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0 as isize);
             }
+            // The first click into the webview still focuses it despite no-activate, and that
+            // drops the transparency (white behind the pill). Put it back the moment it happens,
+            // not after the click like refresh_transparency.
+            let fw = w.clone();
+            w.on_window_event(move |e| {
+                if let tauri::WindowEvent::Focused(_) = e {
+                    keep_transparent(&fw);
+                }
+            });
             place(&w);
             apply_window_settings(app.handle(), &load_settings(app.handle()));
             let cw = w.clone();

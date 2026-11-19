@@ -524,6 +524,15 @@ const AC_DC: GUID = GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548); // 
 
 static LAST_BRIGHTNESS: Mutex<Option<u32>> = Mutex::new(None);
 
+/// Desktops get the AC notification too; without this they'd show a "charging 100%" battery.
+fn has_battery() -> bool {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    let mut s = SYSTEM_POWER_STATUS::default();
+    // 128 = no system battery, 255 = unknown status
+    let ok = unsafe { GetSystemPowerStatus(&mut s).is_ok() };
+    ok && s.BatteryFlag != 128 && s.BatteryFlag != 255
+}
+
 unsafe extern "system" fn on_power(_ctx: *const c_void, _ty: u32, setting: *const c_void) -> u32 {
     let s = unsafe { &*(setting as *const POWERBROADCAST_SETTING) };
     let v = unsafe { (s.Data.as_ptr() as *const u32).read_unaligned() };
@@ -534,7 +543,7 @@ unsafe extern "system" fn on_power(_ctx: *const c_void, _ty: u32, setting: *cons
         if prev.is_some_and(|p| p != v) {
             hud("brightness", v as f32 / 100.0, false);
         }
-    } else if g == BATTERY_PCT || g == AC_DC {
+    } else if (g == BATTERY_PCT || g == AC_DC) && has_battery() {
         let mut st = STATE.lock().unwrap();
         let old = st.battery.clone();
         let mut b = old.clone().unwrap_or(Battery { percent: 100, charging: false });

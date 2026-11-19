@@ -26,7 +26,7 @@ type Snapshot = { media: Media | null; battery: { percent: number; charging: boo
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
 type Agents = { sessions: Session[]; tokens_today: number };
 type Tools = { dark: boolean; mic_muted: boolean; awake: boolean };
-type Stats = { cpu: number; mem: number; down: number; up: number };
+type Stats = { cpu: number; mem: number; down: number; up: number; gpu: number };
 /** One line in the Recent tab. `path`: a finished download, opened on click. */
 type Recent = { kind: "notification" | "download" | "agent" | "timer" | "focus"; text: string; at: number; path?: string };
 type Hud = {
@@ -611,7 +611,7 @@ export default function App() {
   ];
   const shown: Tab = tabs.includes(tab) ? tab : "now";
   // System stats: sampled only while someone is looking at them.
-  const statsVisible = mode === "open" && shown === "tools";
+  const statsVisible = mode === "open" && (shown === "tools" || (shown === "now" && !musicPage));
   useEffect(() => {
     if (!statsVisible) return;
     const get = () => invoke<Stats>("stats").then(setStats);
@@ -846,7 +846,13 @@ export default function App() {
               </span>
             ))}
         </div>
-        {remaining && quickTimer}
+        {remaining
+          ? quickTimer
+          : stats && stats.cpu >= 0 && (
+              <span className="usage mono">
+                CPU {Math.round(stats.cpu)}% · RAM {stats.mem}%{stats.gpu >= 0 && ` · GPU ${Math.round(stats.gpu)}%`}
+              </span>
+            )}
       </div>
     </>
   );
@@ -953,6 +959,7 @@ export default function App() {
       <div className="bar mono">
         <span>
           CPU {stats && stats.cpu >= 0 ? `${Math.round(stats.cpu)}%` : "–"} · Memory {stats ? `${stats.mem}%` : "–"}
+          {stats && stats.gpu >= 0 && ` · GPU ${Math.round(stats.gpu)}%`}
         </span>
         <span>{stats && stats.cpu >= 0 ? `↓ ${fmtRate(stats.down)}  ↑ ${fmtRate(stats.up)}` : ""}</span>
       </div>
@@ -1047,6 +1054,7 @@ export default function App() {
       onMouseLeave={onLeave}
       onContextMenu={(e) => e.preventDefault()}
       // Clicking inside the webview drops the window's transparency (white corners); restore it.
+      onPointerDown={() => invoke("refresh_transparency")}
       onPointerUp={() => invoke("refresh_transparency")}
     >
       {side(prefs.left)}

@@ -177,7 +177,7 @@ footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; g
     <h1>Your screen's new top edge.</h1>
     <div>
       <p>Pulo is a Dynamic Island for Windows. Hover the top of your screen to peek, click to open.</p>
-      <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo">GitHub</a></div>
+      <div class="cta"><a class="btn" data-download href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo">GitHub</a></div>
     </div>
   </div>
 
@@ -297,7 +297,7 @@ npm start   <span class="c"># the island, with hot reload</span></code></pre>
 
   <section class="final">
     <h2>Give your screen an edge.</h2>
-    <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a></div>
+    <div class="cta"><a class="btn" data-download href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a></div>
   </section>
 </main>
 <footer><div class="wrap"><span>Pulo · MIT License · Not affiliated with Apple or Microsoft</span><span><a href="https://github.com/PatriusCastro/Pulo">GitHub</a> · <a href="https://github.com/PatriusCastro/Pulo/blob/main/SECURITY.md">Security</a></span></div></footer>
@@ -307,6 +307,20 @@ const island = document.getElementById("island");
 const fit = () => island.style.setProperty("--s", Math.min(1, (island.parentElement.clientWidth - 16) / 520));
 addEventListener("resize", fit);
 fit();
+
+// Download buttons fetch the installer itself. Its file name carries the version, so ask
+// GitHub for the latest release; until that answers (or if it can't) they open Releases.
+fetch("https://api.github.com/repos/PatriusCastro/Pulo/releases/latest")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((rel) => {
+    const exe = rel?.assets?.find((a) => /-setup\.exe$/i.test(a.name));
+    if (!exe) return;
+    document.querySelectorAll("[data-download]").forEach((a) => {
+      a.href = exe.browser_download_url;
+      a.title = `${exe.name} · ${(exe.size / 1048576).toFixed(1)} MB`;
+    });
+  })
+  .catch(() => {});
 </script>
 </body>
 </html>

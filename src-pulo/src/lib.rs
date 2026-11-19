@@ -23,13 +23,17 @@ use windows::{
     },
 };
 
-const TOP_MARGIN: f64 = 6.0;
+/// Gap between the top of the screen and the pill, in px; a setting (top_gap), 6 by default.
+static TOP_GAP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(6);
+/// Transparent margin around the pill inside the window, for its smooth edge (see
+/// apply_region). The pill's `top` in island.css.
+const EDGE: f64 = 2.0;
 // The window is always the largest pill size and never resizes (resizing makes the web
 // content jump for a frame). Instead its window region, which is the only part that is
 // drawn and clickable, is set to the pill's current size. Clicks elsewhere pass through.
 // The open pill (420 wide, .pill.open in island.css) plus a 48 px shortcut column on
-// each side (.side). Must match EXPANDED in App.tsx.
-const MAX: (f64, f64) = (516.0, 268.0);
+// each side (.side), and EDGE above and below it. Must match EXPANDED in App.tsx.
+const MAX: (f64, f64) = (516.0, 268.0 + 2.0 * EDGE);
 /// Shortcut buttons that fit in a side column (also MAX_SHORTCUTS in prefs.ts).
 const MAX_SHORTCUTS: u32 = 5;
 
@@ -67,18 +71,26 @@ fn apply_region(w: &WebviewWindow, s: f64) {
     let pill_w = r.w.min(MAX.0);
     let radius = if r.h <= 36.0 { r.h / 2.0 } else { 30.0 };
     let x0 = (px(MAX.0, s) - px(pill_w, s)) / 2;
+    // Regions are whole pixels with no anti-aliasing. Cut exactly on the pill's edge, they
+    // chop off the webview's smooth edge and leave stairs, so leave a little transparent
+    // margin around every shape for that edge to fade out in. The pill sits EDGE below the
+    // window's top so the margin goes all the way round.
+    let m = px(EDGE, s);
     unsafe {
         // +1: GDI leaves out the right and bottom edges of round regions.
-        let rgn = CreateRoundRectRgn(x0, 0, x0 + px(pill_w, s) + 1, px(r.h, s) + 1, px(radius * 2.0, s), px(radius * 2.0, s));
-        // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
+        let d = px(radius * 2.0, s) + 2 * m;
+        let rgn = CreateRoundRectRgn(x0 - m, 0, x0 + px(pill_w, s) + m + 1, px(r.h, s) + 2 * m + 1, d, d);
+        // 40 px buttons, 4 px into each 48 px column, rows every 48 px from 6 px below the
+        // pill's top.
         for (n, x) in [(r.left, 4.0), (r.right, MAX.0 - 44.0)] {
             for row in 0..n.min(MAX_SHORTCUTS) {
-                let y = 6.0 + row as f64 * 48.0;
-                let b = CreateEllipticRgn(px(x, s), px(y, s), px(x + 40.0, s) + 1, px(y + 40.0, s) + 1);
+                let y = EDGE + 6.0 + row as f64 * 48.0;
+                let b = CreateEllipticRgn(px(x, s) - m, px(y, s) - m, px(x + 40.0, s) + m + 1, px(y + 40.0, s) + m + 1);
                 CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
                 let _ = DeleteObject(b.into());
             }
         }
+        keep_transparent(w); // before the redraw, so it never shows a frame without it
         SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
     }
 }
@@ -88,8 +100,21 @@ fn apply_region(w: &WebviewWindow, s: f64) {
 /// the pill's transparent corners white. Cheap and idempotent, so re-apply freely.
 fn keep_transparent(w: &WebviewWindow) {
     use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND};
+    use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH};
     unsafe {
+        // The white is the window's own surface, which nothing paints. Paint it black: with
+        // blur-behind on, black is see-through, and in the moments it's off, black blends into
+        // the pill instead of flashing white. (Class-wide, so the Settings window gets it too;
+        // its page covers it.)
+        let _ = SetClassLongPtrW(hwnd(w), GCLP_HBRBACKGROUND, GetStockObject(BLACK_BRUSH).0 as isize);
         let empty = CreateRectRgn(0, 0, -1, -1);
+        // Windows 11 draws a thin light border round windows, brighter once Pulo is the active
+        // app (a click, the tray menu, Settings): the white arcs at the pill's ends. No border,
+        // and none of its own corner rounding either.
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND};
+        let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
+        let _ = DwmSetWindowAttribute(hwnd(w), DWMWA_BORDER_COLOR, &none as *const _ as _, 4);
+        let _ = DwmSetWindowAttribute(hwnd(w), DWMWA_WINDOW_CORNER_PREFERENCE, &DWMWCP_DONOTROUND as *const _ as _, 4);
         let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: empty, fTransitionOnMaximized: false.into() };
         let _ = DwmEnableBlurBehindWindow(hwnd(w), &bb);
         let _ = windows::Win32::Graphics::Gdi::DeleteObject(empty.into());
@@ -113,7 +138,8 @@ fn target() -> (RECT, f64) {
         let r = info.rcMonitor;
         let (pw, ph) = (px(MAX.0, s), px(MAX.1, s));
         let x = r.left + (r.right - r.left - pw) / 2;
-        let y = r.top + px(TOP_MARGIN, s);
+        let gap = TOP_GAP.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        let y = r.top + px(gap - EDGE, s); // the pill sits EDGE into its window
         (RECT { left: x, top: y, right: x + pw, bottom: y + ph }, s)
     }
 }
@@ -179,6 +205,35 @@ fn open_mixer() {
     sys::open_mixer();
 }
 
+/// tao hides the title bar but keeps the caption style, and when Pulo's active state changes
+/// (a click, Settings opening, the tray menu) Windows repaints that hidden frame: a white
+/// blink along the top edge. lParam -1 on WM_NCACTIVATE tells it not to repaint the frame;
+/// tao still sees the message.
+unsafe extern "system" fn no_frame_paint(h: HWND, msg: u32, wp: windows::Win32::Foundation::WPARAM, lp: windows::Win32::Foundation::LPARAM, _id: usize, _data: usize) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{Foundation::LPARAM, UI::Shell::DefSubclassProc};
+    let lp = if msg == WM_NCACTIVATE { LPARAM(-1) } else { lp };
+    unsafe { DefSubclassProc(h, msg, wp, lp) }
+}
+
+/// Put the island's transparency back and repaint, now and twice more shortly after: what
+/// drops it (a tray menu opening, another Pulo window taking focus) can finish after the event
+/// that tells us. From another thread on purpose: the tray menu blocks the main one.
+fn refresh_island(app: &AppHandle) {
+    use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
+    let Some(w) = app.get_webview_window("main") else { return };
+    // The page's own background too, in case WebView2 put its default (white) back.
+    let _ = w.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+    thread::spawn(move || {
+        for ms in [0, 100, 400] {
+            thread::sleep(Duration::from_millis(ms));
+            keep_transparent(&w);
+            unsafe {
+                let _ = RedrawWindow(Some(hwnd(&w)), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+            }
+        }
+    });
+}
+
 /// Called by the UI after every click: clicking inside the webview drops the transparency.
 #[tauri::command]
 fn refresh_transparency(window: WebviewWindow) {
@@ -198,12 +253,6 @@ fn media_art() -> Response {
 #[tauri::command]
 async fn media(action: String, value: Option<i64>) {
     sys::media_control(&action, value.unwrap_or(0));
-}
-
-// Sync on purpose: runs on the UI thread, which OLE drag and drop requires.
-#[tauri::command]
-fn drag_out(window: WebviewWindow, paths: Vec<String>) {
-    let _ = sys::drag_files(hwnd(&window), &paths);
 }
 
 #[tauri::command]
@@ -227,6 +276,8 @@ struct Settings {
     click_through: bool, // at rest, clicks go to what's under the island (watch_click_through)
     #[serde(default)]
     show_in_screenshots: bool, // off: hidden from screenshots, recordings and screen sharing
+    #[serde(default)]
+    top_gap: Option<u32>, // px between the top of the screen and the pill; None = 6
 }
 
 // ---------- click-through and screenshots ----------
@@ -235,10 +286,20 @@ static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 
 fn apply_window_settings(app: &AppHandle, s: &Settings) {
     CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
+    TOP_GAP.store(s.top_gap.unwrap_or(6).min(40), std::sync::atomic::Ordering::Relaxed); // place() moves it
     if let Some(w) = app.get_webview_window("main") {
+        use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
         let a = if s.show_in_screenshots { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+        let mut cur = Default::default();
         unsafe {
+            // Changing the affinity rebuilds the window's surface without its transparency
+            // (white island), so only touch it on a real change, then restore and repaint.
+            if GetWindowDisplayAffinity(hwnd(&w), &mut cur).is_ok() && cur == a.0 {
+                return;
+            }
             let _ = SetWindowDisplayAffinity(hwnd(&w), a);
+            keep_transparent(&w);
+            let _ = RedrawWindow(Some(hwnd(&w)), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
         }
     }
 }
@@ -252,22 +313,21 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
         let _ = GetWindowRect(hwnd(w), &mut win);
     }
     let x0 = win.left + (px(MAX.0, s) - px(r.w, s)) / 2;
-    (x0..x0 + px(r.w, s)).contains(&c.x) && (win.top..win.top + px(r.h, s)).contains(&c.y)
+    let y0 = win.top + px(EDGE, s);
+    (x0..x0 + px(r.w, s)).contains(&c.x) && (y0..y0 + px(r.h, s)).contains(&c.y)
 }
 
-/// Let clicks through the whole window (layered + transparent), or take them again.
-fn set_through(w: &WebviewWindow, on: bool) {
-    let bits = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize;
+/// Click-through, only while clicks pass through. Through tao, not by setting the styles by
+/// hand: tao rebuilds the window's styles from its own flags whenever one changes, which
+/// stripped hand-set ones and left the rebuilt surface white.
+fn set_through(w: &WebviewWindow, through: bool) {
+    use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
+    let _ = w.set_ignore_cursor_events(through); // applied later, on tao's thread
     unsafe {
         let h = hwnd(w);
-        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-        SetWindowLongPtrW(h, GWL_EXSTYLE, if on { ex | bits } else { ex & !bits });
-        if on {
-            // A layered window draws nothing until it has an opacity.
-            let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-        }
+        keep_transparent(w);
+        let _ = RedrawWindow(Some(h), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
-    keep_transparent(w);
 }
 
 /// Click-through mode: at rest (or peeking) the island passes clicks to whatever is under
@@ -277,21 +337,31 @@ fn set_through(w: &WebviewWindow, on: bool) {
 fn watch_click_through(w: WebviewWindow) {
     use tauri::Emitter;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
-    let (mut through, mut dim) = (false, false);
+    let mut through = false;
     loop {
         let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
         let r = *REGION.lock().unwrap();
-        let ctrl = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } < 0;
-        let t = on && r.h <= 36.0 && !ctrl;
+        let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
+        let over = on && over_pill(&w, r);
+        let t = on && r.h <= 36.0 && !key(VK_CONTROL);
         if t != through {
-            through = t;
             set_through(&w, t);
+            through = t;
             let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
         }
-        let d = t && over_pill(&w, r);
-        if d != dim {
-            dim = d;
-            let _ = w.emit("dim", d);
+        // The window's opacity: faded to 20% while the mouse is over it, to see what's under it.
+        // Faded here, not with CSS opacity in the page: that let whatever was behind the page
+        // show through, white at times. Also, a layered window draws nothing (Pulo vanishes)
+        // until it has an opacity, and tao makes it layered without one. So check every tick.
+        unsafe {
+            let h = hwnd(&w);
+            let want = if t && over { 51u8 } else { 255 };
+            let mut alpha = 0u8;
+            if GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0
+                && (GetLayeredWindowAttributes(h, None, Some(&mut alpha), None).is_err() || alpha != want)
+            {
+                let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), want, LWA_ALPHA);
+            }
         }
         thread::sleep(Duration::from_millis(if on { 50 } else { 500 }));
     }
@@ -348,8 +418,9 @@ fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>) -> Result<(), String> {
+fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>, top_gap: Option<u32>) -> Result<(), String> {
     let mut s = load_settings(&app);
+    s.top_gap = top_gap.or(s.top_gap);
     s.click_through = click_through.unwrap_or(s.click_through);
     s.show_in_screenshots = show_in_screenshots.unwrap_or(s.show_in_screenshots);
     save_settings(&app, &s)
@@ -519,6 +590,13 @@ pub fn run() {
     }));
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Focus moving between any of Pulo's windows (the island, Settings, the tray menu's
+        // hidden window) drops the island's transparency: white behind the pill.
+        .on_window_event(|win, e| {
+            if let tauri::WindowEvent::Focused(_) = e {
+                refresh_island(win.app_handle());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             resize,
             refresh_transparency,
@@ -528,7 +606,6 @@ pub fn run() {
             snapshot,
             media_art,
             media,
-            drag_out,
             open_path,
             get_settings,
             set_calendar,
@@ -559,6 +636,11 @@ pub fn run() {
                 let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
                 SetWindowLongPtrW(h, GWL_EXSTYLE, ex | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0 as isize);
             }
+            // Also tell tao, or its next style rebuild drops no-activate (see set_through).
+            let _ = w.set_focusable(false);
+            unsafe {
+                let _ = windows::Win32::UI::Shell::SetWindowSubclass(hwnd(&w), Some(no_frame_paint), 1, 0);
+            }
             place(&w);
             apply_window_settings(app.handle(), &load_settings(app.handle()));
             let cw = w.clone();
@@ -578,6 +660,7 @@ pub fn run() {
                 .icon(app.default_window_icon().expect("icon").clone())
                 .tooltip("Pulo")
                 .menu(&menu)
+                .on_tray_icon_event(|tray, _| refresh_island(tray.app_handle()))
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "settings" => open_settings(app),
                     "update" => update::clicked(app),
@@ -615,12 +698,22 @@ pub fn run() {
                     let fs = fullscreen_app_active();
                     if fs != hidden {
                         hidden = fs;
-                        let cmd = if fs { SW_HIDE } else { SW_SHOWNOACTIVATE };
-                        unsafe {
-                            let _ = ShowWindow(hwnd(&w), cmd);
-                        }
+                        // Through tao, so it knows: shown behind its back, its next style rebuild
+                        // hid the island again. Not focusable, so showing doesn't activate it.
+                        let _ = if fs { w.hide() } else { w.show() };
                     }
                     place(&w); // follows the mouse between screens; no-op when already there
+                    // Windows drops the transparency now and then (focus and display changes),
+                    // which paints the margin around the pill white. Put it back within a second.
+                    keep_transparent(&w);
+                    // tao has no flag for tool window (out of Alt+Tab), so its style rebuilds
+                    // drop the one set in setup. Put it back; it doesn't touch layered.
+                    unsafe {
+                        let ex = GetWindowLongPtrW(hwnd(&w), GWL_EXSTYLE);
+                        if ex & WS_EX_TOOLWINDOW.0 as isize == 0 {
+                            SetWindowLongPtrW(hwnd(&w), GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
+                        }
+                    }
                     if on("notifications") {
                         sys::poll_notifications();
                     }

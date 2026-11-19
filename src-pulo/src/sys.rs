@@ -269,7 +269,7 @@ pub fn watch_volume() -> Result<()> {
     Ok(())
 }
 
-// ---------- downloads + file shelf ----------
+// ---------- downloads ----------
 
 const TEMP_EXTS: [&str; 6] = [".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"];
 
@@ -337,38 +337,6 @@ pub fn watch_dir(
         }
         f(batch); // empty batch = buffer overflowed and changes were dropped
     }
-}
-
-/// Start a native drag of these files, as if from Explorer. Call on the UI thread while
-/// the mouse button is down; returns when the drop finishes.
-pub fn drag_files(hwnd: windows::Win32::Foundation::HWND, paths: &[String]) -> Result<()> {
-    use windows::{
-        core::HSTRING,
-        Win32::{
-            System::{Com::IDataObject, Ole::DROPEFFECT_COPY},
-            UI::Shell::{Common::ITEMIDLIST, *},
-        },
-    };
-    unsafe {
-        let pidls: Vec<*const ITEMIDLIST> = paths
-            .iter()
-            .filter_map(|p| {
-                let mut pidl = std::ptr::null_mut();
-                SHParseDisplayName(&HSTRING::from(p.as_str()), None, &mut pidl, 0, None).ok()?;
-                Some(pidl as *const _)
-            })
-            .collect();
-        if pidls.is_empty() {
-            return Ok(());
-        }
-        let items = SHCreateShellItemArrayFromIDLists(&pidls);
-        for p in &pidls {
-            CoTaskMemFree(Some(*p as _));
-        }
-        let data: IDataObject = items?.BindToHandler(None, &BHID_DataObject)?;
-        let _ = SHDoDragDrop(Some(hwnd), &data, None, DROPEFFECT_COPY);
-    }
-    Ok(())
 }
 
 pub fn open_path(path: &str) {
@@ -556,6 +524,15 @@ const AC_DC: GUID = GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548); // 
 
 static LAST_BRIGHTNESS: Mutex<Option<u32>> = Mutex::new(None);
 
+/// Desktops get the AC notification too; without this they'd show a "charging 100%" battery.
+fn has_battery() -> bool {
+    use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+    let mut s = SYSTEM_POWER_STATUS::default();
+    // 128 = no system battery, 255 = unknown status
+    let ok = unsafe { GetSystemPowerStatus(&mut s).is_ok() };
+    ok && s.BatteryFlag != 128 && s.BatteryFlag != 255
+}
+
 unsafe extern "system" fn on_power(_ctx: *const c_void, _ty: u32, setting: *const c_void) -> u32 {
     let s = unsafe { &*(setting as *const POWERBROADCAST_SETTING) };
     let v = unsafe { (s.Data.as_ptr() as *const u32).read_unaligned() };
@@ -566,7 +543,7 @@ unsafe extern "system" fn on_power(_ctx: *const c_void, _ty: u32, setting: *cons
         if prev.is_some_and(|p| p != v) {
             hud("brightness", v as f32 / 100.0, false);
         }
-    } else if g == BATTERY_PCT || g == AC_DC {
+    } else if (g == BATTERY_PCT || g == AC_DC) && has_battery() {
         let mut st = STATE.lock().unwrap();
         let old = st.battery.clone();
         let mut b = old.clone().unwrap_or(Battery { percent: 100, charging: false });

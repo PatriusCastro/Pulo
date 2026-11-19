@@ -7,8 +7,7 @@ export const FEATURES = [
   ["media", "Now playing", "Track, album art and controls"],
   ["equalizer", "Live equalizer", "Bars that follow the music while the island is open"],
   ["notifications", "Notifications", "New Windows notifications appear in the island (MSIX build only)"],
-  ["downloads", "Downloads", "Finished downloads appear and go on the shelf"],
-  ["shelf", "File shelf", "Drop files on the island to keep them handy"],
+  ["downloads", "Downloads", "Finished downloads appear and go to Recent"],
   ["calendar", "Calendar", "Next event, and a heads-up 15 minutes before"],
   ["agents", "AI agents", "Claude Code sessions, and a notice when a long task finishes"],
   ["devices", "Device batteries", "Bluetooth mouse, keyboard and headphones"],
@@ -54,6 +53,7 @@ export type Settings = {
   ui: Partial<Prefs> | null;
   click_through?: boolean;
   show_in_screenshots?: boolean;
+  top_gap?: number | null;
 };
 export const EMPTY_SETTINGS: Settings = { calendar_url: "", lyrics: false, off: [], ui: null };
 

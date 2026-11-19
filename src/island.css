@@ -5,6 +5,7 @@
   --chip: rgba(255, 255, 255, 0.1);
   /* Smooth deceleration, no overshoot: the window region clips anything past the final size. */
   --morph: cubic-bezier(0.32, 0.72, 0, 1);
+  --feather: 0 0 1.5px 0.5px rgba(0, 0, 0, 0.6);
 }
 
 html,
@@ -46,16 +47,11 @@ button:focus-visible {
 .island {
   position: fixed;
   inset: 0;
-  transition: opacity 0.15s;
-}
-/* Click-through mode with the mouse over it: see what's underneath. */
-.island.faded {
-  opacity: 0.2;
 }
 /* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
 .side {
   position: fixed;
-  top: 0;
+  top: 2px; /* level with the pill (EDGE in lib.rs) */
   width: 48px;
   display: flex;
   flex-direction: column;
@@ -87,6 +83,7 @@ button:focus-visible {
   border-radius: 50%;
   background: #000;
   color: var(--fg);
+  box-shadow: var(--feather);
 }
 .shortcut:hover {
   background: #1c1c1e;
@@ -97,7 +94,7 @@ button:focus-visible {
 }
 .pill {
   position: fixed;
-  top: 0;
+  top: 2px; /* EDGE in lib.rs: room for the smooth edge above it too */
   left: 50%;
   transform: translateX(-50%);
   width: 200px;
@@ -105,6 +102,9 @@ button:focus-visible {
   border-radius: 18px;
   background: #000;
   overflow: hidden;
+  /* Fades the edge over a couple of pixels instead of one, so it reads smooth even at
+     100% scaling. Stays inside the 2 px margin the window region leaves (apply_region). */
+  box-shadow: var(--feather);
   transition:
     width 0.34s var(--morph),
     height 0.34s var(--morph),
@@ -607,72 +607,10 @@ button:focus-visible {
   width: 36px;
   height: 36px;
 }
-.shelf {
-  display: flex;
-  gap: 6px;
-  height: 48px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.item {
-  position: relative;
-  flex: none;
-  width: 92px;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background: var(--chip);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.item:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-.ext {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  color: var(--accent);
-}
-.name {
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.item .remove {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 18px;
-  height: 18px;
-  opacity: 0;
-}
-.item:hover .remove {
-  opacity: 1;
-}
-/* Sits with the status bar at the bottom, so the free space stays in one place. */
-/* The player (or the clock) sits centred in the room above the shelf, not stuck to the tabs
-   with a hole underneath. */
+/* The player (or the clock) sits centred in the tab, not stuck to the tabs with a hole underneath. */
 .tab-body > .player,
 .tab-body > .idle {
   margin-block: auto;
-}
-/* A hint, not a feature: low and quiet until there's something on the shelf. */
-.shelf:has(.shelf-empty) {
-  height: 34px;
-}
-.shelf-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  color: rgba(245, 245, 245, 0.45);
-  font-size: 12px;
 }
 .hud-text {
   max-width: 150px;
@@ -947,6 +885,10 @@ button:focus-visible {
   align-items: center;
   gap: 10px;
 }
+.usage {
+  font-size: 12px;
+  white-space: nowrap;
+}
 .dev {
   display: inline-flex;
   align-items: center;
@@ -997,4 +939,17 @@ button:focus-visible {
   .pet.happy {
     animation: none;
   }
+}
+
+/* Marquee (App.tsx): clipped, not ellipsized, and fading at the edges while it scrolls. */
+.marquee {
+  display: block;
+  text-overflow: clip;
+}
+.marquee.over {
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+}
+.mq-track {
+  display: inline-flex;
+  gap: 40px; /* MARQUEE_GAP */
 }

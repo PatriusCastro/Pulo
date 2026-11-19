@@ -128,6 +128,20 @@ export default function Settings() {
         <p id="capture-help" className="help indent">
           Off: screenshots, screen recordings and screen sharing leave it out.
         </p>
+        <label className="field gap">
+          <span>Space above the island: {saved.top_gap ?? 6} px</span>
+          <input
+            type="range"
+            min={0}
+            max={40}
+            value={saved.top_gap ?? 6}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setSaved((s) => ({ ...s, top_gap: v }));
+              invoke("set_window", { topGap: v }); // the island moves within a second
+            }}
+          />
+        </label>
         <fieldset className="radio">
           <legend>Open the island</legend>
           <label className="check">

@@ -6,7 +6,6 @@ import * as P from "./pomodoro";
 import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, type Settings } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./island.css";
 
 type Device = { name: string; percent: number; kind: string };
@@ -27,7 +26,7 @@ type Snapshot = { media: Media | null; battery: { percent: number; charging: boo
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
 type Agents = { sessions: Session[]; tokens_today: number };
 type Tools = { dark: boolean; mic_muted: boolean; awake: boolean };
-type Stats = { cpu: number; mem: number; down: number; up: number };
+type Stats = { cpu: number; mem: number; down: number; up: number; gpu: number };
 /** One line in the Recent tab. `path`: a finished download, opened on click. */
 type Recent = { kind: "notification" | "download" | "agent" | "timer" | "focus"; text: string; at: number; path?: string };
 type Hud = {
@@ -127,6 +126,47 @@ const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
   </svg>
 );
 
+/** Text that scrolls when it doesn't fit: one pass, a pause, again. Not a running CSS
+ *  animation, which keeps the island repainting (and costs CPU) even while it's paused. */
+const MARQUEE_GAP = 40;
+const Marquee = ({ className, children }: { className: string; children: React.ReactNode }) => {
+  const box = useRef<HTMLSpanElement>(null);
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    const b = box.current!;
+    const first = b.firstElementChild!.firstElementChild as HTMLElement;
+    const check = () => setOver(first.offsetWidth > b.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(b);
+    return () => ro.disconnect();
+  }, [children]);
+  useEffect(() => {
+    if (!over) return;
+    const track = box.current!.firstElementChild as HTMLElement;
+    const d = (track.firstElementChild as HTMLElement).offsetWidth + MARQUEE_GAP;
+    let t = 0;
+    let a: Animation | null = null;
+    const pass = () => {
+      a = track.animate([{ transform: "translateX(0)" }, { transform: `translateX(${-d}px)` }], { duration: (d / 35) * 1000 });
+      a.onfinish = () => (t = window.setTimeout(pass, 2500));
+    };
+    t = window.setTimeout(pass, 2000);
+    return () => {
+      clearTimeout(t);
+      a?.cancel();
+    };
+  }, [over, children]);
+  return (
+    <span ref={box} className={`${className} marquee${over ? " over" : ""}`}>
+      <span className="mq-track">
+        <span>{children}</span>
+        {over && <span aria-hidden>{children}</span>}
+      </span>
+    </span>
+  );
+};
+
 const fmtTokens = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
 // A session still marked working after 10 quiet minutes was most likely closed mid-turn.
@@ -153,10 +193,6 @@ const shortModel = (id: string) => {
 };
 
 const fileName = (p: string) => p.split(/[\\/]/).pop() || p;
-const fileExt = (p: string) => {
-  const n = fileName(p);
-  return n.includes(".") ? n.split(".").pop()!.slice(0, 4).toUpperCase() : "FILE";
-};
 
 /** localStorage, which can throw or come back empty; the island works without it. */
 function load<T>(key: string, fallback: T): T {
@@ -255,7 +291,6 @@ export default function App() {
   const hoverTimer = useRef<number | undefined>(undefined);
   const hudTimer = useRef<number | undefined>(undefined);
   const audio = useRef<AudioContext | null>(null);
-  const [shelf, setShelf] = useState<string[]>(() => load("shelf", []));
   const [events, setEvents] = useState<Raw[]>([]);
   const [agents, setAgents] = useState<Agents>({ sessions: [], tokens_today: 0 });
   const [devices, setDevices] = useState<Device[]>([]);
@@ -264,7 +299,6 @@ export default function App() {
   // Play/pause shown right after a click, until the player reports back.
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
   const optimisticTimer = useRef<number | undefined>(undefined);
-  const dragStart = useRef<{ x: number; y: number; path: string } | null>(null);
   const [lyrics, setLyrics] = useState<Line[]>([]);
   // Music page (the music button in Now): full player with seek, shuffle, repeat, volume, lyrics.
   const [musicPage, setMusicPage] = useState(false);
@@ -272,7 +306,6 @@ export default function App() {
   const [volume, setVolume] = useState(0);
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
-  const [faded, setFaded] = useState(false); // click-through mode, mouse over the pill
   const [cheerUntil, setCheerUntil] = useState(0);
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
@@ -291,20 +324,6 @@ export default function App() {
     setRecent([]);
     save("recent", []);
   };
-
-  // Newest first, no duplicates, kept across restarts.
-  const addToShelf = (paths: string[]) =>
-    setShelf((cur) => {
-      const next = [...paths, ...cur.filter((p) => !paths.includes(p))].slice(0, 30);
-      save("shelf", next);
-      return next;
-    });
-  const removeFromShelf = (path: string) =>
-    setShelf((cur) => {
-      const next = cur.filter((p) => p !== path);
-      save("shelf", next);
-      return next;
-    });
 
   const showHud = (h: Hud, ms = 1600) => {
     setHud(h);
@@ -394,9 +413,8 @@ export default function App() {
         collapseSoon(4000);
       }),
       listen<boolean>("away", (e) => setAway(e.payload)),
-      // Click-through mode (watch_click_through in lib.rs): fade while the mouse is over the
-      // pill, and treat clicks starting to pass through as the mouse leaving.
-      listen<boolean>("dim", (e) => setFaded(e.payload)),
+      // Click-through mode (watch_click_through in lib.rs; it also fades the window): treat
+      // clicks starting to pass through as the mouse leaving.
       listen<boolean>("passthrough", (e) => e.payload && onLeave()),
       listen<Device[]>("devices", (e) => setDevices(e.payload)),
       listen<Device>("device_connected", (e) => {
@@ -418,7 +436,6 @@ export default function App() {
         if (!on("downloads")) return;
         cheer();
         addRecent("download", fileName(e.payload), e.payload);
-        if (on("shelf")) addToShelf([e.payload]);
         showHud({ kind: "download", level: 1, flag: false, text: fileName(e.payload) }, 4000);
       }),
       // Fires on mic level changes too; only a change of mute counts.
@@ -428,17 +445,6 @@ export default function App() {
         setTools((t) => ({ ...t, mic_muted: e.payload }));
         if (on("tools"))
           showHud({ kind: "mic", level: 1, flag: e.payload, text: e.payload ? "Microphone muted" : "Microphone on", icon: e.payload ? ICONS.micOff : ICONS.mic }, 2500);
-      }),
-      // Files dragged onto the pill: open it while hovering, add them to the shelf on drop.
-      getCurrentWebview().onDragDropEvent((e) => {
-        const t = e.payload.type;
-        if (t === "enter") {
-          clearTimeout(leave.current);
-          go("open");
-        } else if (t === "drop") {
-          if (on("shelf")) addToShelf(e.payload.paths);
-          collapseSoon(1500); // no mouse events fire during a drag; the next mouseenter cancels this
-        } else if (t === "leave") collapseSoon(150);
       }),
     ];
     return () => un.forEach((p) => p.then((f) => f()));
@@ -644,7 +650,7 @@ export default function App() {
   ];
   const shown: Tab = tabs.includes(tab) ? tab : "now";
   // System stats: sampled only while someone is looking at them.
-  const statsVisible = mode === "open" && shown === "tools";
+  const statsVisible = mode === "open" && (shown === "tools" || (shown === "now" && !musicPage));
   useEffect(() => {
     if (!statsVisible) return;
     const get = () => invoke<Stats>("stats").then(setStats);
@@ -669,14 +675,6 @@ export default function App() {
       micRef.current = t.mic_muted;
       setTools(t);
     });
-
-  // Shelf items: click opens, press-and-move drags the file out like Explorer does.
-  const onItemMove = (e: React.MouseEvent) => {
-    const d = dragStart.current;
-    if (!d || !(e.buttons & 1) || Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
-    dragStart.current = null;
-    invoke("drag_out", { paths: [d.path] }).then(() => invoke("refresh_transparency"));
-  };
 
   // ---------- pieces ----------
 
@@ -790,7 +788,7 @@ export default function App() {
         </button>
         {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty"><Icon d={ICONS.music} size={18} /></div>}
         <div className="meta">
-          <div className="title">{media.title || "Unknown title"}</div>
+          <Marquee className="title">{media.title || "Unknown title"}</Marquee>
           <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
         </div>
         {transport}
@@ -849,7 +847,7 @@ export default function App() {
           <div className="media">
             {art ? <img className="art" src={art} alt="" /> : <div className="art empty"><Icon d={ICONS.music} size={28} /></div>}
             <div className="meta">
-              <div className="title">{media.title || "Unknown title"}</div>
+              <Marquee className="title">{media.title || "Unknown title"}</Marquee>
               <div className="sub-row">
                 <div className="sub">{media.artist}</div>
                 {isOpen && playing && has("equalizer") && <Equalizer />}
@@ -871,42 +869,6 @@ export default function App() {
           {nextLabel && <div className="next-event">{nextLabel}</div>}
         </div>
       )}
-      {has("shelf") && (
-        <div className="shelf" onMouseMove={onItemMove} onMouseUp={() => (dragStart.current = null)}>
-          {shelf.length ? (
-            shelf.map((p) => (
-              <div
-                key={p}
-                className="item"
-                title={p}
-                onMouseDown={(e) => {
-                  if (e.button === 0) dragStart.current = { x: e.clientX, y: e.clientY, path: p };
-                }}
-                onClick={() => invoke("open_path", { path: p })}
-              >
-                <span className="ext">{fileExt(p)}</span>
-                <span className="name">{fileName(p)}</span>
-                <button
-                  className="remove"
-                  aria-label={`Remove ${fileName(p)}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFromShelf(p);
-                  }}
-                >
-                  <Icon d={ICONS.close} size={12} />
-                </button>
-              </div>
-            ))
-          ) : (
-            <div className="shelf-empty">
-              <Icon d={ICONS.shelf} size={16} />
-              Drop files on the island to keep them here
-            </div>
-          )}
-        </div>
-      )}
       <div className="bar">
         <div className="bar-left">
           {battery && (
@@ -923,7 +885,13 @@ export default function App() {
               </span>
             ))}
         </div>
-        {remaining && quickTimer}
+        {remaining
+          ? quickTimer
+          : stats && stats.cpu >= 0 && (
+              <span className="usage mono">
+                CPU {Math.round(stats.cpu)}% · RAM {stats.mem}%{stats.gpu >= 0 && ` · GPU ${Math.round(stats.gpu)}%`}
+              </span>
+            )}
       </div>
     </>
   );
@@ -1030,6 +998,7 @@ export default function App() {
       <div className="bar mono">
         <span>
           CPU {stats && stats.cpu >= 0 ? `${Math.round(stats.cpu)}%` : "–"} · Memory {stats ? `${stats.mem}%` : "–"}
+          {stats && stats.gpu >= 0 && ` · GPU ${Math.round(stats.gpu)}%`}
         </span>
         <span>{stats && stats.cpu >= 0 ? `↓ ${fmtRate(stats.down)}  ↑ ${fmtRate(stats.up)}` : ""}</span>
       </div>
@@ -1091,10 +1060,10 @@ export default function App() {
   ) : media ? (
     <div className="peek-row">
       {art ? <img className="mini-art" src={art} alt="" /> : <span className="mini-art empty" />}
-      <span className="peek-main">
+      <Marquee className="peek-main">
         {media.title || "Unknown title"}
         {media.artist && <span className="dim"> · {media.artist}</span>}
-      </span>
+      </Marquee>
       <button aria-label="Previous" onClick={only(() => invoke("media", { action: "prev" }))}>
         <Icon d={ICONS.prev} />
       </button>
@@ -1119,11 +1088,12 @@ export default function App() {
 
   return (
     <div
-      className={`island ${mode}${faded ? " faded" : ""}`}
+      className={`island ${mode}`}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onContextMenu={(e) => e.preventDefault()}
       // Clicking inside the webview drops the window's transparency (white corners); restore it.
+      onPointerDown={() => invoke("refresh_transparency")}
       onPointerUp={() => invoke("refresh_transparency")}
     >
       {side(prefs.left)}

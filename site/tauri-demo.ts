@@ -146,7 +146,7 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
       return { ...tools };
     }
     case "stats":
-      return { cpu: 12 + Math.random() * 10, mem: Math.round(48 + Math.random() * 3), down: 120_000 * Math.random(), up: 20_000 * Math.random() };
+      return { cpu: 12 + Math.random() * 10, mem: Math.round(48 + Math.random() * 3), down: 120_000 * Math.random(), up: 20_000 * Math.random(), gpu: 4 + Math.random() * 6 };
     case "calendar":
       return ics();
     case "agents":
@@ -165,5 +165,5 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
   }
 }
 
-// A little life while the visitor watches: a download lands on the shelf.
+// A little life while the visitor watches: a download finishes.
 setTimeout(() => emit("download", "C:\\Users\\you\\Downloads\\boarding-pass.pdf"), 9000);

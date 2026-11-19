@@ -13,7 +13,7 @@ Built with [Tauri 2](https://tauri.app) (Rust) and React. It's light: no looping
 | **Synced lyrics** | Big lines in the style of Apple Music and Spotify, on a background tinted by the album cover. Click a line to jump to it. Lyrics come from [lrclib.net](https://lrclib.net). |
 | **Focus timer** | Pomodoro rounds with a progress ring and adjustable lengths. |
 | **Calendar** | Your next event, plus a heads-up 15 minutes before. Works with any iCal link (Google, Outlook, …). |
-| **File shelf** | Drop files on the island to keep them handy, then drag them back out. Finished downloads land here too. |
+| **Downloads** | A notice when a download finishes. Open it later from the Recent tab. |
 | **Notifications** | New Windows notifications appear in the island (MSIX build only). |
 | **Device batteries** | Bluetooth mouse, keyboard and headphones. |
 | **AI agents** | Follows [Claude Code](https://claude.com/claude-code) sessions and tells you when a long task finishes. |

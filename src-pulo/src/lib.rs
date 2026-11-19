@@ -282,13 +282,9 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
 /// stripped hand-set ones and left the rebuilt surface white.
 fn set_through(w: &WebviewWindow, through: bool) {
     use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
-    let _ = w.set_ignore_cursor_events(through);
+    let _ = w.set_ignore_cursor_events(through); // applied later, on tao's thread
     unsafe {
         let h = hwnd(w);
-        if through {
-            // A layered window draws nothing until it has an opacity; tao doesn't set one.
-            let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
-        }
         keep_transparent(w);
         let _ = RedrawWindow(Some(h), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     }
@@ -308,6 +304,16 @@ fn watch_click_through(w: WebviewWindow) {
         let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
         let over = on && over_pill(&w, r);
         let t = on && r.h <= 36.0 && !key(VK_CONTROL);
+        // A layered window draws nothing (Pulo vanishes) until it has an opacity, and tao
+        // makes it layered without one, some time after set_ignore_cursor_events. Check here.
+        unsafe {
+            let h = hwnd(&w);
+            if GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0
+                && GetLayeredWindowAttributes(h, None, None, None).is_err()
+            {
+                let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
+            }
+        }
         if t != through {
             set_through(&w, t);
             through = t;

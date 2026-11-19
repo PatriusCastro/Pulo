@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pulo: Dynamic Island for Windows</title>
 <meta name="description" content="Pulo is a free, open-source Dynamic Island for Windows. Hover the top of your screen to peek, click to open.">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="256x256" href="icon-256.png">
+<link rel="apple-touch-icon" href="icon-256.png">
+<meta name="theme-color" content="#07090c">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
@@ -39,7 +43,7 @@ header nav a { text-decoration: none; } header nav a:hover { color: var(--ink); 
 .intro { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 32px; align-items: end; padding: 64px 0 32px; }
 h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
 .intro p { color: var(--ink-2); font-size: 1.1rem; margin-bottom: 18px; }
-@media (max-width: 760px) { .intro { grid-template-columns: minmax(0, 1fr); padding-top: 40px; } }
+@media (max-width: 900px) { .intro { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 40px; } .intro p { max-width: 46ch; } }
 
 /* The screen: a wallpaper with the live island near its top edge, where Pulo puts it. */
 .screen {
@@ -51,7 +55,11 @@ h1 { font-size: clamp(2.5rem, 6vw, 4.25rem); line-height: 1; letter-spacing: -.0
 /* Pulo's real interface (island/, built by `npm run site`) in its own 520x290 window. */
 .island { position: absolute; top: 28px; left: 50%; width: 520px; height: 290px; border: 0; transform: translateX(-50%) scale(var(--s, 1)); transform-origin: top center; background: transparent; color-scheme: normal; }
 .hint { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: .92rem; color: rgba(241, 243, 244, .8); padding: 0 16px; }
-@media (max-width: 600px) { .island { top: 16px; } }
+.hint .touch { display: none; }
+@media (hover: none) { .hint .mouse { display: none; } .hint .touch { display: inline; } }
+/* Phones: aspect-ratio plus a min-height would force the screen wider than the phone, so
+   give it a fixed height that fits the scaled island when open. */
+@media (max-width: 600px) { .screen { aspect-ratio: auto; min-height: 0; height: 300px; } .island { top: 16px; } .hint { bottom: 14px; font-size: .85rem; } }
 
 /* Sections */
 section { padding-top: 128px; scroll-margin-top: 40px; }
@@ -90,7 +98,7 @@ section { padding-top: 128px; scroll-margin-top: 40px; }
 .moments { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; color: var(--ink-2); font-size: .95rem; }
 .moments .d-pill { height: 30px; font-size: .78rem; }
 .moments .d-pill svg { width: 13px; height: 13px; fill: currentColor; }
-@media (max-width: 860px) { .states { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 860px) { .states { grid-template-columns: minmax(0, 1fr); } .stage { height: auto; margin-bottom: 20px; } .state { padding: 24px 20px 20px; } }
 
 /* Features */
 .features { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 40px; }
@@ -173,13 +181,13 @@ footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; g
     <h1>Your screen's new top edge.</h1>
     <div>
       <p>Pulo is a Dynamic Island for Windows. Hover the top of your screen to peek, click to open.</p>
-      <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo">GitHub</a></div>
+      <div class="cta"><a class="btn" data-download href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a><a class="btn ghost" href="https://github.com/PatriusCastro/Pulo">GitHub</a></div>
     </div>
   </div>
 
   <div class="screen">
     <iframe class="island" id="island" src="island/index.html" title="Live Pulo island. Hover to peek, click to open, then try the tabs and controls."></iframe>
-    <p class="hint">Try it: hover the island to peek, click to open. Everything inside works.</p>
+    <p class="hint"><span class="mouse">Try it: hover the island to peek, click to open. Everything inside works.</span><span class="touch">Try it: tap the island to open it. Everything inside works.</span></p>
   </div>
 
   <section id="how">
@@ -293,7 +301,7 @@ npm start   <span class="c"># the island, with hot reload</span></code></pre>
 
   <section class="final">
     <h2>Give your screen an edge.</h2>
-    <div class="cta"><a class="btn" href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a></div>
+    <div class="cta"><a class="btn" data-download href="https://github.com/PatriusCastro/Pulo/releases/latest">Download for Windows</a></div>
   </section>
 </main>
 <footer><div class="wrap"><span>Pulo · MIT License · Not affiliated with Apple or Microsoft</span><span><a href="https://github.com/PatriusCastro/Pulo">GitHub</a> · <a href="https://github.com/PatriusCastro/Pulo/blob/main/SECURITY.md">Security</a></span></div></footer>
@@ -303,6 +311,20 @@ const island = document.getElementById("island");
 const fit = () => island.style.setProperty("--s", Math.min(1, (island.parentElement.clientWidth - 16) / 520));
 addEventListener("resize", fit);
 fit();
+
+// Download buttons fetch the installer itself. Its file name carries the version, so ask
+// GitHub for the latest release; until that answers (or if it can't) they open Releases.
+fetch("https://api.github.com/repos/PatriusCastro/Pulo/releases/latest")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((rel) => {
+    const exe = rel?.assets?.find((a) => /-setup\.exe$/i.test(a.name));
+    if (!exe) return;
+    document.querySelectorAll("[data-download]").forEach((a) => {
+      a.href = exe.browser_download_url;
+      a.title = `${exe.name} · ${(exe.size / 1048576).toFixed(1)} MB`;
+    });
+  })
+  .catch(() => {});
 </script>
 </body>
 </html>

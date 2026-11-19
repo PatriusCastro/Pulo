@@ -366,13 +366,34 @@ fn open_window(app: &AppHandle, label: &'static str, title: &'static str, (w, h)
 
 const RUN_KEY: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Run");
 
-#[tauri::command]
+/// Installed as an MSIX (Store or local test package) rather than by the .exe installer.
+fn packaged() -> bool {
+    windows::ApplicationModel::Package::Current().is_ok()
+}
+
+/// Packaged apps can't use the Run key (their HKCU writes go to a private copy), so they
+/// start with Windows through the manifest's startup task instead.
+fn startup_task() -> Option<windows::ApplicationModel::StartupTask> {
+    windows::ApplicationModel::StartupTask::GetAsync(windows::core::h!("Pulo")).ok()?.get().ok()
+}
+
+#[tauri::command(async)]
 fn autostart_enabled() -> bool {
+    if packaged() {
+        use windows::ApplicationModel::StartupTaskState as S;
+        return startup_task().is_some_and(|t| matches!(t.State(), Ok(S::Enabled | S::EnabledByPolicy)));
+    }
     unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, w!("Pulo"), RRF_RT_REG_SZ, None, None, None).is_ok() }
 }
 
-#[tauri::command]
+#[tauri::command(async)] // off the UI thread: the startup task calls block on WinRT
 fn set_autostart(on: bool) {
+    if packaged() {
+        if let Some(t) = startup_task() {
+            let _ = if on { t.RequestEnableAsync().and_then(|op| op.get()).map(|_| ()) } else { t.Disable() };
+        }
+        return;
+    }
     unsafe {
         if on {
             let exe = std::env::current_exe().unwrap_or_default();
@@ -461,8 +482,13 @@ pub fn run() {
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let updates = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Pulo", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings, &updates, &quit])?;
-            update::start(app.handle().clone(), updates);
+            // The Store updates packaged copies itself; only the .exe install updates from GitHub.
+            let menu = if packaged() {
+                Menu::with_items(app, &[&settings, &quit])?
+            } else {
+                update::start(app.handle().clone(), updates.clone());
+                Menu::with_items(app, &[&settings, &updates, &quit])?
+            };
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("icon").clone())
                 .tooltip("Pulo")

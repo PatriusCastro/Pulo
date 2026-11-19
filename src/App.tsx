@@ -191,23 +191,30 @@ async function inspectArt(blob: Blob): Promise<{ icon: boolean; tint: string | n
   }
 }
 
-/** The cover's average colour as a deep background shade (like Apple Music's lyrics), dark
- *  enough that white text keeps its contrast whatever the cover. */
+/** The cover's dominant colour as a deep background shade (like Apple Music's lyrics), dark
+ *  enough that white text keeps its contrast whatever the cover. Pixels count by how colourful
+ *  they are, so a red shirt on a grey photo gives red, not grey; only a truly grey cover stays
+ *  grey. */
 function tintOf(px: Uint8ClampedArray) {
-  let r = 0, g = 0, b = 0;
+  let r = 0, g = 0, b = 0, w = 0, sat = 0;
   for (let i = 0; i < px.length; i += 4) {
-    r += px[i];
-    g += px[i + 1];
-    b += px[i + 2];
+    const c = Math.max(px[i], px[i + 1], px[i + 2]) - Math.min(px[i], px[i + 1], px[i + 2]);
+    const k = c * c + 1; // colourful pixels dominate; +1 keeps grey covers defined
+    r += px[i] * k;
+    g += px[i + 1] * k;
+    b += px[i + 2] * k;
+    w += k;
+    sat += c;
   }
-  const n = px.length / 4;
-  [r, g, b] = [r / n / 255, g / n / 255, b / n / 255];
+  [r, g, b] = [r / w / 255, g / w / 255, b / w / 255];
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
   let h = 0;
   if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   const l = (max + min) / 2;
   const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
-  return `hsl(${Math.round(h * 60 + 360) % 360} ${Math.round(Math.min(s, 0.55) * 100)}% 20%)`;
+  const grey = sat / (px.length / 4) < 12; // average chroma out of 255
+  const S = grey ? Math.min(s, 0.1) : Math.min(Math.max(s, 0.45), 0.7);
+  return `hsl(${Math.round(h * 60 + 360) % 360} ${Math.round(S * 100)}% 22%)`;
 }
 
 function chime(ctx: AudioContext) {

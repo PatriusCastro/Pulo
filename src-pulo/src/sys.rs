@@ -87,8 +87,12 @@ fn wake_media() {
 /// Re-read the player whenever Windows says something changed (track, play state,
 /// position, current player), instead of asking every second: each read is a
 /// cross-process call into the player. A 30 s backstop covers missed events.
+/// Blocks forever; run on its own thread.
 pub fn watch_media() {
     use windows::Foundation::TypedEventHandler;
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED); // WinRT calls need an apartment
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     let _ = MEDIA_WAKE.set(Mutex::new(tx));
     if let Some(m) = manager() {
@@ -125,8 +129,8 @@ fn read_art(p: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Res
     Ok(buf)
 }
 
-// ponytail: polled at 1 Hz by the main loop. Swap for the session's MediaPropertiesChanged /
-// PlaybackInfoChanged events if idle CPU shows it.
+/// Read the current player and push it to the UI if anything changed. Called by
+/// watch_media on player events, and by media_control right after a button press.
 pub fn poll_media() {
     let cur = session().and_then(|s| {
         let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;

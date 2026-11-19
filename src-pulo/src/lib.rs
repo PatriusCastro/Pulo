@@ -238,7 +238,8 @@ fn on(feature: &str) -> bool {
 // flag if leaving one running until restart ever matters.
 fn start_watchers() {
     static STARTED: Mutex<Vec<&str>> = Mutex::new(Vec::new());
-    let watchers: [(&str, fn()); 5] = [
+    let watchers: [(&str, fn()); 6] = [
+        ("media", sys::watch_media),
         ("downloads", || drop(sys::watch_downloads())),
         ("agents", || drop(agents::watch())),
         ("devices", devices::watch),
@@ -471,8 +472,9 @@ pub fn run() {
                 thread::sleep(Duration::from_secs(600));
             });
 
-            // ponytail: 1 Hz poll for fullscreen, monitor changes and media (~0% CPU). Switch to
-            // ABN_FULLSCREENAPP / WM_DISPLAYCHANGE / SMTC events if this ever shows up in a profile.
+            // ponytail: 1 Hz poll for fullscreen, monitor changes and notifications (~0% CPU).
+            // Switch to ABN_FULLSCREENAPP / WM_DISPLAYCHANGE if this ever shows up in a profile.
+            // Media is event-driven (sys::watch_media).
             // Also hides on any fullscreen app, even one on a different monitor.
             named("tick", move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
@@ -490,9 +492,6 @@ pub fn run() {
                         }
                     }
                     place(&w); // follows the mouse between screens; no-op when already there
-                    if on("media") {
-                        sys::poll_media();
-                    }
                     if on("notifications") {
                         sys::poll_notifications();
                     }

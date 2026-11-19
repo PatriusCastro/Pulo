@@ -5,6 +5,7 @@
   --chip: rgba(255, 255, 255, 0.1);
   /* Smooth deceleration, no overshoot: the window region clips anything past the final size. */
   --morph: cubic-bezier(0.32, 0.72, 0, 1);
+  --feather: 0 0 1.5px 0.5px rgba(0, 0, 0, 0.6);
 }
 
 html,
@@ -87,6 +88,7 @@ button:focus-visible {
   border-radius: 50%;
   background: #000;
   color: var(--fg);
+  box-shadow: var(--feather);
 }
 .shortcut:hover {
   background: #1c1c1e;
@@ -105,6 +107,9 @@ button:focus-visible {
   border-radius: 18px;
   background: #000;
   overflow: hidden;
+  /* Fades the edge over a couple of pixels instead of one, so it reads smooth even at
+     100% scaling. Stays inside the 2 px margin the window region leaves (apply_region). */
+  box-shadow: var(--feather);
   transition:
     width 0.34s var(--morph),
     height 0.34s var(--morph),

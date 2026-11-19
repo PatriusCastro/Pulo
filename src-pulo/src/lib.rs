@@ -205,6 +205,16 @@ fn open_mixer() {
     sys::open_mixer();
 }
 
+/// tao hides the title bar but keeps the caption style, and when Pulo's active state changes
+/// (a click, Settings opening, the tray menu) Windows repaints that hidden frame: a white
+/// blink along the top edge. lParam -1 on WM_NCACTIVATE tells it not to repaint the frame;
+/// tao still sees the message.
+unsafe extern "system" fn no_frame_paint(h: HWND, msg: u32, wp: windows::Win32::Foundation::WPARAM, lp: windows::Win32::Foundation::LPARAM, _id: usize, _data: usize) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{Foundation::LPARAM, UI::Shell::DefSubclassProc};
+    let lp = if msg == WM_NCACTIVATE { LPARAM(-1) } else { lp };
+    unsafe { DefSubclassProc(h, msg, wp, lp) }
+}
+
 /// Put the island's transparency back and repaint, now and twice more shortly after: what
 /// drops it (a tray menu opening, another Pulo window taking focus) can finish after the event
 /// that tells us. From another thread on purpose: the tray menu blocks the main one.
@@ -628,6 +638,9 @@ pub fn run() {
             }
             // Also tell tao, or its next style rebuild drops no-activate (see set_through).
             let _ = w.set_focusable(false);
+            unsafe {
+                let _ = windows::Win32::UI::Shell::SetWindowSubclass(hwnd(&w), Some(no_frame_paint), 1, 0);
+            }
             place(&w);
             apply_window_settings(app.handle(), &load_settings(app.handle()));
             let cw = w.clone();

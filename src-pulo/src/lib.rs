@@ -638,6 +638,9 @@ pub fn run() {
                         }
                     }
                     place(&w); // follows the mouse between screens; no-op when already there
+                    // Windows drops the transparency now and then (focus and display changes),
+                    // which paints the margin around the pill white. Put it back within a second.
+                    keep_transparent(&w);
                     if on("notifications") {
                         sys::poll_notifications();
                     }

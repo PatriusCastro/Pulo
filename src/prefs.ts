@@ -47,7 +47,14 @@ export const DEFAULT_PREFS: Prefs = {
   pomodoro: POMODORO,
 };
 
-export type Settings = { calendar_url: string; lyrics: boolean; off: string[]; ui: Partial<Prefs> | null };
+export type Settings = {
+  calendar_url: string;
+  lyrics: boolean;
+  off: string[];
+  ui: Partial<Prefs> | null;
+  click_through?: boolean;
+  show_in_screenshots?: boolean;
+};
 export const EMPTY_SETTINGS: Settings = { calendar_url: "", lyrics: false, off: [], ui: null };
 
 /** Saved preferences on top of the defaults, dropping shortcuts that no longer exist. */

@@ -46,6 +46,11 @@ button:focus-visible {
 .island {
   position: fixed;
   inset: 0;
+  transition: opacity 0.15s;
+}
+/* Click-through mode with the mouse over it: see what's underneath. */
+.island.faded {
+  opacity: 0.2;
 }
 /* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
 .side {

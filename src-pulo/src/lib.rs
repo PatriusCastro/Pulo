@@ -23,13 +23,17 @@ use windows::{
     },
 };
 
-const TOP_MARGIN: f64 = 6.0;
+/// Gap above the window; with EDGE the pill sits 6 px below the top of the screen.
+const TOP_MARGIN: f64 = 4.0;
+/// Transparent margin around the pill inside the window, for its smooth edge (see
+/// apply_region). The pill's `top` in island.css.
+const EDGE: f64 = 2.0;
 // The window is always the largest pill size and never resizes (resizing makes the web
 // content jump for a frame). Instead its window region, which is the only part that is
 // drawn and clickable, is set to the pill's current size. Clicks elsewhere pass through.
 // The open pill (420 wide, .pill.open in island.css) plus a 48 px shortcut column on
-// each side (.side). Must match EXPANDED in App.tsx.
-const MAX: (f64, f64) = (516.0, 268.0);
+// each side (.side), and EDGE above and below it. Must match EXPANDED in App.tsx.
+const MAX: (f64, f64) = (516.0, 268.0 + 2.0 * EDGE);
 /// Shortcut buttons that fit in a side column (also MAX_SHORTCUTS in prefs.ts).
 const MAX_SHORTCUTS: u32 = 5;
 
@@ -69,16 +73,18 @@ fn apply_region(w: &WebviewWindow, s: f64) {
     let x0 = (px(MAX.0, s) - px(pill_w, s)) / 2;
     // Regions are whole pixels with no anti-aliasing. Cut exactly on the pill's edge, they
     // chop off the webview's smooth edge and leave stairs, so leave a little transparent
-    // margin around every shape for that edge to fade out in.
-    let m = px(2.0, s);
+    // margin around every shape for that edge to fade out in. The pill sits EDGE below the
+    // window's top so the margin goes all the way round.
+    let m = px(EDGE, s);
     unsafe {
         // +1: GDI leaves out the right and bottom edges of round regions.
         let d = px(radius * 2.0, s) + 2 * m;
-        let rgn = CreateRoundRectRgn(x0 - m, 0, x0 + px(pill_w, s) + m + 1, px(r.h, s) + m + 1, d, d);
-        // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
+        let rgn = CreateRoundRectRgn(x0 - m, 0, x0 + px(pill_w, s) + m + 1, px(r.h, s) + 2 * m + 1, d, d);
+        // 40 px buttons, 4 px into each 48 px column, rows every 48 px from 6 px below the
+        // pill's top.
         for (n, x) in [(r.left, 4.0), (r.right, MAX.0 - 44.0)] {
             for row in 0..n.min(MAX_SHORTCUTS) {
-                let y = 6.0 + row as f64 * 48.0;
+                let y = EDGE + 6.0 + row as f64 * 48.0;
                 let b = CreateEllipticRgn(px(x, s) - m, px(y, s) - m, px(x + 40.0, s) + m + 1, px(y + 40.0, s) + m + 1);
                 CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
                 let _ = DeleteObject(b.into());
@@ -257,7 +263,8 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
         let _ = GetWindowRect(hwnd(w), &mut win);
     }
     let x0 = win.left + (px(MAX.0, s) - px(r.w, s)) / 2;
-    (x0..x0 + px(r.w, s)).contains(&c.x) && (win.top..win.top + px(r.h, s)).contains(&c.y)
+    let y0 = win.top + px(EDGE, s);
+    (x0..x0 + px(r.w, s)).contains(&c.x) && (y0..y0 + px(r.h, s)).contains(&c.y)
 }
 
 /// Click-through needs the window layered and transparent. Layered stays on for as long as

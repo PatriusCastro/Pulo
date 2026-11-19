@@ -56,7 +56,7 @@ button:focus-visible {
 /* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
 .side {
   position: fixed;
-  top: 0;
+  top: 2px; /* level with the pill (EDGE in lib.rs) */
   width: 48px;
   display: flex;
   flex-direction: column;
@@ -99,7 +99,7 @@ button:focus-visible {
 }
 .pill {
   position: fixed;
-  top: 0;
+  top: 2px; /* EDGE in lib.rs: room for the smooth edge above it too */
   left: 50%;
   transform: translateX(-50%);
   width: 200px;

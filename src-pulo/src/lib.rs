@@ -277,23 +277,16 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
     (x0..x0 + px(r.w, s)).contains(&c.x) && (y0..y0 + px(r.h, s)).contains(&c.y)
 }
 
-/// Click-through needs the window layered and transparent. Only while clicks pass through:
-/// a click on a layered window loses the see-through background (white behind the pill),
-/// so when it takes clicks again (Ctrl) it goes back to a normal window. Windows rebuilds
-/// the surface when layered comes off and must be told to repaint, or that shows white too.
+/// Click-through, only while clicks pass through. Through tao, not by setting the styles by
+/// hand: tao rebuilds the window's styles from its own flags whenever one changes, which
+/// stripped hand-set ones and left the rebuilt surface white.
 fn set_through(w: &WebviewWindow, through: bool) {
     use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
-    let bits = (WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0) as isize;
+    let _ = w.set_ignore_cursor_events(through);
     unsafe {
         let h = hwnd(w);
-        let old = GetWindowLongPtrW(h, GWL_EXSTYLE);
-        let ex = if through { old | bits } else { old & !bits };
-        if ex == old {
-            return;
-        }
-        SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
         if through {
-            // A layered window draws nothing until it has an opacity.
+            // A layered window draws nothing until it has an opacity; tao doesn't set one.
             let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
         }
         keep_transparent(w);
@@ -590,6 +583,8 @@ pub fn run() {
                 let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
                 SetWindowLongPtrW(h, GWL_EXSTYLE, ex | (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0 as isize);
             }
+            // Also tell tao, or its next style rebuild drops no-activate (see set_through).
+            let _ = w.set_focusable(false);
             // The first click into the webview still focuses it despite no-activate, and that
             // drops the transparency (white behind the pill). Put it back the moment it happens,
             // not after the click like refresh_transparency.
@@ -664,6 +659,14 @@ pub fn run() {
                     // Windows drops the transparency now and then (focus and display changes),
                     // which paints the margin around the pill white. Put it back within a second.
                     keep_transparent(&w);
+                    // tao has no flag for tool window (out of Alt+Tab), so its style rebuilds
+                    // drop the one set in setup. Put it back; it doesn't touch layered.
+                    unsafe {
+                        let ex = GetWindowLongPtrW(hwnd(&w), GWL_EXSTYLE);
+                        if ex & WS_EX_TOOLWINDOW.0 as isize == 0 {
+                            SetWindowLongPtrW(hwnd(&w), GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW.0 as isize);
+                        }
+                    }
                     if on("notifications") {
                         sys::poll_notifications();
                     }

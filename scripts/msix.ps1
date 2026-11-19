@@ -5,11 +5,12 @@
 # installed dev package (same version can't be reinstalled) and starts it.
 #
 # Microsoft Store (-Store): builds an unsigned package for Partner Center, which signs it.
-# Copy the three values from Partner Center > your app > Product identity:
-#   npm run msix -- -Store -Name "12345Pulo.Pulo" -Publisher "CN=..." -PublisherName "Your name"
+# Copy the three values from Partner Center > your app > Product identity, and pass the
+# name you reserved as -DisplayName (the Store checks they match):
+#   npm run msix -- -Store -Name "12345Pulo.Pulo" -Publisher "CN=..." -PublisherName "Your name" -DisplayName "Pulo"
 param(
   [switch]$Setup, [switch]$Install,
-  [switch]$Store, [string]$Name, [string]$Publisher, [string]$PublisherName
+  [switch]$Store, [string]$Name, [string]$Publisher, [string]$PublisherName, [string]$DisplayName = 'Pulo'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
@@ -53,7 +54,7 @@ if ($Store) {
   $esc = { param($s) [Security.SecurityElement]::Escape($s) }
   $manifest = $manifest.Replace('Name="Pulo.Dev" Publisher="CN=Pulo Dev"', "Name=`"$(& $esc $Name)`" Publisher=`"$(& $esc $Publisher)`"").
     Replace('<PublisherDisplayName>Pulo</PublisherDisplayName>', "<PublisherDisplayName>$(& $esc $PublisherName)</PublisherDisplayName>").
-    Replace('Pulo (dev)', 'Pulo')
+    Replace('Pulo (dev)', (& $esc $DisplayName))
 }
 [IO.File]::WriteAllText((Join-Path $stage 'AppxManifest.xml'), $manifest)
 

@@ -612,97 +612,10 @@ button:focus-visible {
   width: 36px;
   height: 36px;
 }
-.shelf {
-  display: flex;
-  gap: 6px;
-  height: 48px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.item {
-  position: relative;
-  flex: none;
-  width: 92px;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background: var(--chip);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-}
-.item:hover {
-  background: rgba(255, 255, 255, 0.16);
-}
-.ext {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  color: var(--accent);
-}
-.name {
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.item .remove {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 18px;
-  height: 18px;
-  opacity: 0;
-}
-.item:hover .remove {
-  opacity: 1;
-}
-/* Sits with the status bar at the bottom, so the free space stays in one place. */
-/* The player (or the clock) sits centred in the room above the shelf, not stuck to the tabs
-   with a hole underneath. */
+/* The player (or the clock) sits centred in the tab, not stuck to the tabs with a hole underneath. */
 .tab-body > .player,
 .tab-body > .idle {
   margin-block: auto;
-}
-/* A hint, not a feature: low and quiet until there's something on the shelf. */
-.shelf:has(.shelf-empty) {
-  height: 34px;
-}
-.shelf-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  color: rgba(245, 245, 245, 0.45);
-  font-size: 12px;
-}
-/* Files dragged over the island: the whole open panel is the target. */
-.drop-zone {
-  position: absolute;
-  inset: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 2px dashed rgba(61, 220, 132, 0.6);
-  border-radius: 22px;
-  background: #06160e;
-  color: var(--fg);
-  font-size: 14px;
-  text-align: center;
-  pointer-events: none;
-}
-.drop-zone svg {
-  color: #3ddc84;
-}
-.drop-zone span {
-  max-width: 280px;
-  color: var(--dim);
-  font-size: 11px;
 }
 .hud-text {
   max-width: 150px;

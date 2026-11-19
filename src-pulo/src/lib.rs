@@ -90,12 +90,9 @@ fn apply_region(w: &WebviewWindow, s: f64) {
                 let _ = DeleteObject(b.into());
             }
         }
-        // No redraw here: a redraw before the transparency is back shows one white frame on
-        // every state change. The webview fills the window anyway, so put the transparency
-        // back first and let the next frame show both. The window takes ownership of rgn.
-        SetWindowRgn(hwnd(w), Some(rgn), false);
+        keep_transparent(w); // before the redraw, so it never shows a frame without it
+        SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
     }
-    keep_transparent(w);
 }
 
 /// Transparency comes from DWM blur-behind with an empty region (how tao sets it up). tao
@@ -103,7 +100,13 @@ fn apply_region(w: &WebviewWindow, s: f64) {
 /// the pill's transparent corners white. Cheap and idempotent, so re-apply freely.
 fn keep_transparent(w: &WebviewWindow) {
     use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND};
+    use windows::Win32::Graphics::Gdi::{GetStockObject, BLACK_BRUSH};
     unsafe {
+        // The white is the window's own surface, which nothing paints. Paint it black: with
+        // blur-behind on, black is see-through, and in the moments it's off, black blends into
+        // the pill instead of flashing white. (Class-wide, so the Settings window gets it too;
+        // its page covers it.)
+        let _ = SetClassLongPtrW(hwnd(w), GCLP_HBRBACKGROUND, GetStockObject(BLACK_BRUSH).0 as isize);
         let empty = CreateRectRgn(0, 0, -1, -1);
         let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: empty, fTransitionOnMaximized: false.into() };
         let _ = DwmEnableBlurBehindWindow(hwnd(w), &bb);
@@ -215,12 +218,6 @@ async fn media(action: String, value: Option<i64>) {
     sys::media_control(&action, value.unwrap_or(0));
 }
 
-// Sync on purpose: runs on the UI thread, which OLE drag and drop requires.
-#[tauri::command]
-fn drag_out(window: WebviewWindow, paths: Vec<String>) {
-    let _ = sys::drag_files(hwnd(&window), &paths);
-}
-
 #[tauri::command]
 async fn open_path(path: String) {
     sys::open_path(&path);
@@ -295,19 +292,17 @@ fn set_through(w: &WebviewWindow, layered: bool, through: bool) {
 /// Click-through mode: at rest (or peeking) the island passes clicks to whatever is under
 /// it, a browser's tabs say, and fades while the mouse is over it. Holding Ctrl makes it
 /// take clicks again, and once open (Ctrl+click or the keyboard shortcut) it works as usual.
-/// A button held down over it (dragging files in) also lets it take the drop. A click that
-/// started on whatever is underneath still lands there: that window already has the mouse.
 // ponytail: polls at 20 Hz while the mode is on; a low-level mouse hook if that ever shows up.
 fn watch_click_through(w: WebviewWindow) {
     use tauri::Emitter;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LBUTTON};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
     let (mut layered, mut through, mut dim) = (false, false, false);
     loop {
         let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
         let r = *REGION.lock().unwrap();
         let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
         let over = on && over_pill(&w, r);
-        let t = on && r.h <= 36.0 && !key(VK_CONTROL) && !(over && key(VK_LBUTTON));
+        let t = on && r.h <= 36.0 && !key(VK_CONTROL);
         if on != layered || t != through {
             set_through(&w, on, t);
             layered = on;
@@ -556,7 +551,6 @@ pub fn run() {
             snapshot,
             media_art,
             media,
-            drag_out,
             open_path,
             get_settings,
             set_calendar,

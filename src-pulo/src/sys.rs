@@ -269,7 +269,7 @@ pub fn watch_volume() -> Result<()> {
     Ok(())
 }
 
-// ---------- downloads + file shelf ----------
+// ---------- downloads ----------
 
 const TEMP_EXTS: [&str; 6] = [".crdownload", ".part", ".partial", ".download", ".tmp", ".opdownload"];
 
@@ -337,38 +337,6 @@ pub fn watch_dir(
         }
         f(batch); // empty batch = buffer overflowed and changes were dropped
     }
-}
-
-/// Start a native drag of these files, as if from Explorer. Call on the UI thread while
-/// the mouse button is down; returns when the drop finishes.
-pub fn drag_files(hwnd: windows::Win32::Foundation::HWND, paths: &[String]) -> Result<()> {
-    use windows::{
-        core::HSTRING,
-        Win32::{
-            System::{Com::IDataObject, Ole::DROPEFFECT_COPY},
-            UI::Shell::{Common::ITEMIDLIST, *},
-        },
-    };
-    unsafe {
-        let pidls: Vec<*const ITEMIDLIST> = paths
-            .iter()
-            .filter_map(|p| {
-                let mut pidl = std::ptr::null_mut();
-                SHParseDisplayName(&HSTRING::from(p.as_str()), None, &mut pidl, 0, None).ok()?;
-                Some(pidl as *const _)
-            })
-            .collect();
-        if pidls.is_empty() {
-            return Ok(());
-        }
-        let items = SHCreateShellItemArrayFromIDLists(&pidls);
-        for p in &pidls {
-            CoTaskMemFree(Some(*p as _));
-        }
-        let data: IDataObject = items?.BindToHandler(None, &BHID_DataObject)?;
-        let _ = SHDoDragDrop(Some(hwnd), &data, None, DROPEFFECT_COPY);
-    }
-    Ok(())
 }
 
 pub fn open_path(path: &str) {

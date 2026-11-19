@@ -165,5 +165,5 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
   }
 }
 
-// A little life while the visitor watches: a download lands on the shelf.
+// A little life while the visitor watches: a download finishes.
 setTimeout(() => emit("download", "C:\\Users\\you\\Downloads\\boarding-pass.pdf"), 9000);

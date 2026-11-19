@@ -6,7 +6,6 @@ import * as P from "./pomodoro";
 import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, type Settings } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "./island.css";
 
 type Device = { name: string; percent: number; kind: string };
@@ -153,10 +152,6 @@ const shortModel = (id: string) => {
 };
 
 const fileName = (p: string) => p.split(/[\\/]/).pop() || p;
-const fileExt = (p: string) => {
-  const n = fileName(p);
-  return n.includes(".") ? n.split(".").pop()!.slice(0, 4).toUpperCase() : "FILE";
-};
 
 /** localStorage, which can throw or come back empty; the island works without it. */
 function load<T>(key: string, fallback: T): T {
@@ -255,7 +250,6 @@ export default function App() {
   const hoverTimer = useRef<number | undefined>(undefined);
   const hudTimer = useRef<number | undefined>(undefined);
   const audio = useRef<AudioContext | null>(null);
-  const [shelf, setShelf] = useState<string[]>(() => load("shelf", []));
   const [events, setEvents] = useState<Raw[]>([]);
   const [agents, setAgents] = useState<Agents>({ sessions: [], tokens_today: 0 });
   const [devices, setDevices] = useState<Device[]>([]);
@@ -264,7 +258,6 @@ export default function App() {
   // Play/pause shown right after a click, until the player reports back.
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
   const optimisticTimer = useRef<number | undefined>(undefined);
-  const dragStart = useRef<{ x: number; y: number; path: string } | null>(null);
   const [lyrics, setLyrics] = useState<Line[]>([]);
   // Music page (the music button in Now): full player with seek, shuffle, repeat, volume, lyrics.
   const [musicPage, setMusicPage] = useState(false);
@@ -273,7 +266,6 @@ export default function App() {
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
   const [faded, setFaded] = useState(false); // click-through mode, mouse over the pill
-  const [dropping, setDropping] = useState(false); // files are being dragged over the island
   const [cheerUntil, setCheerUntil] = useState(0);
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
@@ -292,20 +284,6 @@ export default function App() {
     setRecent([]);
     save("recent", []);
   };
-
-  // Newest first, no duplicates, kept across restarts.
-  const addToShelf = (paths: string[]) =>
-    setShelf((cur) => {
-      const next = [...paths, ...cur.filter((p) => !paths.includes(p))].slice(0, 30);
-      save("shelf", next);
-      return next;
-    });
-  const removeFromShelf = (path: string) =>
-    setShelf((cur) => {
-      const next = cur.filter((p) => p !== path);
-      save("shelf", next);
-      return next;
-    });
 
   const showHud = (h: Hud, ms = 1600) => {
     setHud(h);
@@ -419,7 +397,6 @@ export default function App() {
         if (!on("downloads")) return;
         cheer();
         addRecent("download", fileName(e.payload), e.payload);
-        if (on("shelf")) addToShelf([e.payload]);
         showHud({ kind: "download", level: 1, flag: false, text: fileName(e.payload) }, 4000);
       }),
       // Fires on mic level changes too; only a change of mute counts.
@@ -429,31 +406,6 @@ export default function App() {
         setTools((t) => ({ ...t, mic_muted: e.payload }));
         if (on("tools"))
           showHud({ kind: "mic", level: 1, flag: e.payload, text: e.payload ? "Microphone muted" : "Microphone on", icon: e.payload ? ICONS.micOff : ICONS.mic }, 2500);
-      }),
-      // Files dragged onto the pill: open it as one big drop zone, add them to the shelf on drop
-      // and show them there. Opening reshapes the window, which can make Windows report a
-      // "leave" mid-drag, so a leave waits a second and any further movement cancels it.
-      getCurrentWebview().onDragDropEvent((e) => {
-        if (!on("shelf")) return;
-        const t = e.payload.type;
-        if (t === "enter" || t === "over") {
-          clearTimeout(leave.current);
-          if (t === "enter") {
-            setDropping(true);
-            go("open");
-          }
-        } else if (t === "drop") {
-          setDropping(false);
-          addToShelf(e.payload.paths);
-          pickTab("now");
-          collapseSoon(2500); // no mouse events fire during a drag; the next mouseenter cancels this
-        } else if (t === "leave") {
-          clearTimeout(leave.current);
-          leave.current = window.setTimeout(() => {
-            setDropping(false);
-            go("rest");
-          }, 1000);
-        }
       }),
     ];
     return () => un.forEach((p) => p.then((f) => f()));
@@ -685,14 +637,6 @@ export default function App() {
       setTools(t);
     });
 
-  // Shelf items: click opens, press-and-move drags the file out like Explorer does.
-  const onItemMove = (e: React.MouseEvent) => {
-    const d = dragStart.current;
-    if (!d || !(e.buttons & 1) || Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
-    dragStart.current = null;
-    invoke("drag_out", { paths: [d.path] }).then(() => invoke("refresh_transparency"));
-  };
-
   // ---------- pieces ----------
 
   const hudEl = hud && (
@@ -884,42 +828,6 @@ export default function App() {
           <div className="big-clock mono">{clock}</div>
           <div className="sub">{date.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}</div>
           {nextLabel && <div className="next-event">{nextLabel}</div>}
-        </div>
-      )}
-      {has("shelf") && (
-        <div className="shelf" onMouseMove={onItemMove} onMouseUp={() => (dragStart.current = null)}>
-          {shelf.length ? (
-            shelf.map((p) => (
-              <div
-                key={p}
-                className="item"
-                title={p}
-                onMouseDown={(e) => {
-                  if (e.button === 0) dragStart.current = { x: e.clientX, y: e.clientY, path: p };
-                }}
-                onClick={() => invoke("open_path", { path: p })}
-              >
-                <span className="ext">{fileExt(p)}</span>
-                <span className="name">{fileName(p)}</span>
-                <button
-                  className="remove"
-                  aria-label={`Remove ${fileName(p)}`}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeFromShelf(p);
-                  }}
-                >
-                  <Icon d={ICONS.close} size={12} />
-                </button>
-              </div>
-            ))
-          ) : (
-            <div className="shelf-empty">
-              <Icon d={ICONS.shelf} size={16} />
-              Drop files on the island to keep them here
-            </div>
-          )}
         </div>
       )}
       <div className="bar">
@@ -1211,13 +1119,6 @@ export default function App() {
                     ? agentsTab
                     : toolsTab}
           </div>
-          {dropping && (
-            <div className="drop-zone" aria-hidden>
-              <Icon d={ICONS.shelf} size={28} />
-              <b>Drop to add to the shelf</b>
-              <span>The file stays in its folder. Click it on the shelf to open it, or drag it out into any app.</span>
-            </div>
-          )}
         </div>
       </div>
       {side(prefs.right)}

@@ -206,6 +206,12 @@ select:focus-visible {
 .field input {
   width: 80px;
 }
+.field.gap {
+  margin-top: 12px;
+}
+.field.gap input {
+  width: 240px;
+}
 
 /* scratchpad window */
 .scratch {

@@ -23,8 +23,8 @@ use windows::{
     },
 };
 
-/// Gap above the window; with EDGE the pill sits 6 px below the top of the screen.
-const TOP_MARGIN: f64 = 4.0;
+/// Gap between the top of the screen and the pill, in px; a setting (top_gap), 6 by default.
+static TOP_GAP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(6);
 /// Transparent margin around the pill inside the window, for its smooth edge (see
 /// apply_region). The pill's `top` in island.css.
 const EDGE: f64 = 2.0;
@@ -131,7 +131,8 @@ fn target() -> (RECT, f64) {
         let r = info.rcMonitor;
         let (pw, ph) = (px(MAX.0, s), px(MAX.1, s));
         let x = r.left + (r.right - r.left - pw) / 2;
-        let y = r.top + px(TOP_MARGIN, s);
+        let gap = TOP_GAP.load(std::sync::atomic::Ordering::Relaxed) as f64;
+        let y = r.top + px(gap - EDGE, s); // the pill sits EDGE into its window
         (RECT { left: x, top: y, right: x + pw, bottom: y + ph }, s)
     }
 }
@@ -197,6 +198,23 @@ fn open_mixer() {
     sys::open_mixer();
 }
 
+/// Put the island's transparency back and repaint, now and twice more shortly after: what
+/// drops it (a tray menu opening, another Pulo window taking focus) can finish after the event
+/// that tells us. From another thread on purpose: the tray menu blocks the main one.
+fn refresh_island(app: &AppHandle) {
+    use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
+    let Some(w) = app.get_webview_window("main") else { return };
+    thread::spawn(move || {
+        for ms in [0, 100, 400] {
+            thread::sleep(Duration::from_millis(ms));
+            keep_transparent(&w);
+            unsafe {
+                let _ = RedrawWindow(Some(hwnd(&w)), None, None, RDW_ERASE | RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+            }
+        }
+    });
+}
+
 /// Called by the UI after every click: clicking inside the webview drops the transparency.
 #[tauri::command]
 fn refresh_transparency(window: WebviewWindow) {
@@ -239,6 +257,8 @@ struct Settings {
     click_through: bool, // at rest, clicks go to what's under the island (watch_click_through)
     #[serde(default)]
     show_in_screenshots: bool, // off: hidden from screenshots, recordings and screen sharing
+    #[serde(default)]
+    top_gap: Option<u32>, // px between the top of the screen and the pill; None = 6
 }
 
 // ---------- click-through and screenshots ----------
@@ -247,6 +267,7 @@ static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 
 fn apply_window_settings(app: &AppHandle, s: &Settings) {
     CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
+    TOP_GAP.store(s.top_gap.unwrap_or(6).min(40), std::sync::atomic::Ordering::Relaxed); // place() moves it
     if let Some(w) = app.get_webview_window("main") {
         use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
         let a = if s.show_in_screenshots { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
@@ -379,8 +400,9 @@ fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>) -> Result<(), String> {
+fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>, top_gap: Option<u32>) -> Result<(), String> {
     let mut s = load_settings(&app);
+    s.top_gap = top_gap.or(s.top_gap);
     s.click_through = click_through.unwrap_or(s.click_through);
     s.show_in_screenshots = show_in_screenshots.unwrap_or(s.show_in_screenshots);
     save_settings(&app, &s)
@@ -550,6 +572,13 @@ pub fn run() {
     }));
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Focus moving between any of Pulo's windows (the island, Settings, the tray menu's
+        // hidden window) drops the island's transparency: white behind the pill.
+        .on_window_event(|win, e| {
+            if let tauri::WindowEvent::Focused(_) = e {
+                refresh_island(win.app_handle());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             resize,
             refresh_transparency,
@@ -591,15 +620,6 @@ pub fn run() {
             }
             // Also tell tao, or its next style rebuild drops no-activate (see set_through).
             let _ = w.set_focusable(false);
-            // The first click into the webview still focuses it despite no-activate, and that
-            // drops the transparency (white behind the pill). Put it back the moment it happens,
-            // not after the click like refresh_transparency.
-            let fw = w.clone();
-            w.on_window_event(move |e| {
-                if let tauri::WindowEvent::Focused(_) = e {
-                    keep_transparent(&fw);
-                }
-            });
             place(&w);
             apply_window_settings(app.handle(), &load_settings(app.handle()));
             let cw = w.clone();
@@ -619,6 +639,7 @@ pub fn run() {
                 .icon(app.default_window_icon().expect("icon").clone())
                 .tooltip("Pulo")
                 .menu(&menu)
+                .on_tray_icon_event(|tray, _| refresh_island(tray.app_handle()))
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "settings" => open_settings(app),
                     "update" => update::clicked(app),

@@ -126,6 +126,47 @@ const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
   </svg>
 );
 
+/** Text that scrolls when it doesn't fit: one pass, a pause, again. Not a running CSS
+ *  animation, which keeps the island repainting (and costs CPU) even while it's paused. */
+const MARQUEE_GAP = 40;
+const Marquee = ({ className, children }: { className: string; children: React.ReactNode }) => {
+  const box = useRef<HTMLSpanElement>(null);
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    const b = box.current!;
+    const first = b.firstElementChild!.firstElementChild as HTMLElement;
+    const check = () => setOver(first.offsetWidth > b.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(b);
+    return () => ro.disconnect();
+  }, [children]);
+  useEffect(() => {
+    if (!over) return;
+    const track = box.current!.firstElementChild as HTMLElement;
+    const d = (track.firstElementChild as HTMLElement).offsetWidth + MARQUEE_GAP;
+    let t = 0;
+    let a: Animation | null = null;
+    const pass = () => {
+      a = track.animate([{ transform: "translateX(0)" }, { transform: `translateX(${-d}px)` }], { duration: (d / 35) * 1000 });
+      a.onfinish = () => (t = window.setTimeout(pass, 2500));
+    };
+    t = window.setTimeout(pass, 2000);
+    return () => {
+      clearTimeout(t);
+      a?.cancel();
+    };
+  }, [over, children]);
+  return (
+    <span ref={box} className={`${className} marquee${over ? " over" : ""}`}>
+      <span className="mq-track">
+        <span>{children}</span>
+        {over && <span aria-hidden>{children}</span>}
+      </span>
+    </span>
+  );
+};
+
 const fmtTokens = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
 // A session still marked working after 10 quiet minutes was most likely closed mid-turn.
@@ -749,7 +790,7 @@ export default function App() {
         </button>
         {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty"><Icon d={ICONS.music} size={18} /></div>}
         <div className="meta">
-          <div className="title">{media.title || "Unknown title"}</div>
+          <Marquee className="title">{media.title || "Unknown title"}</Marquee>
           <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
         </div>
         {transport}
@@ -808,7 +849,7 @@ export default function App() {
           <div className="media">
             {art ? <img className="art" src={art} alt="" /> : <div className="art empty"><Icon d={ICONS.music} size={28} /></div>}
             <div className="meta">
-              <div className="title">{media.title || "Unknown title"}</div>
+              <Marquee className="title">{media.title || "Unknown title"}</Marquee>
               <div className="sub-row">
                 <div className="sub">{media.artist}</div>
                 {isOpen && playing && has("equalizer") && <Equalizer />}
@@ -1021,10 +1062,10 @@ export default function App() {
   ) : media ? (
     <div className="peek-row">
       {art ? <img className="mini-art" src={art} alt="" /> : <span className="mini-art empty" />}
-      <span className="peek-main">
+      <Marquee className="peek-main">
         {media.title || "Unknown title"}
         {media.artist && <span className="dim"> · {media.artist}</span>}
-      </span>
+      </Marquee>
       <button aria-label="Previous" onClick={only(() => invoke("media", { action: "prev" }))}>
         <Icon d={ICONS.prev} />
       </button>

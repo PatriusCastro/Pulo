@@ -53,6 +53,7 @@ export type Settings = {
   ui: Partial<Prefs> | null;
   click_through?: boolean;
   show_in_screenshots?: boolean;
+  top_gap?: number | null;
 };
 export const EMPTY_SETTINGS: Settings = { calendar_url: "", lyrics: false, off: [], ui: null };
 

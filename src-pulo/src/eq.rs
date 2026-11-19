@@ -3,7 +3,7 @@
 
 use crate::sys::APP;
 use std::{
-    sync::atomic::{AtomicBool, Ordering::Relaxed},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
     thread,
     time::Duration,
 };
@@ -17,6 +17,9 @@ use windows::{
 };
 
 pub static ON: AtomicBool = AtomicBool::new(false);
+/// Milliseconds between updates sent to the UI: as often as the bars on screen repaint,
+/// since every update costs the webview work.
+pub static INTERVAL_MS: AtomicU64 = AtomicU64::new(33);
 
 /// Band centers in Hz, low to high.
 const BANDS: [f32; 5] = [60.0, 250.0, 1000.0, 4000.0, 12000.0];
@@ -89,7 +92,7 @@ fn capture() -> Result<()> {
         let mut shown = [0f32; 5];
         client.Start()?;
         while ON.load(Relaxed) {
-            thread::sleep(Duration::from_millis(33));
+            thread::sleep(Duration::from_millis(INTERVAL_MS.load(Relaxed)));
             let mut energy = [0f32; 5];
             let mut n = 0usize;
             while cap.GetNextPacketSize()? > 0 {

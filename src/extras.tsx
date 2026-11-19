@@ -5,24 +5,26 @@ import { listen } from "@tauri-apps/api/event";
 import { lineAt, type Line } from "./lyrics";
 
 /** Live bars. Mount only while visible: capture runs exactly as long as this is mounted.
- *  Updates the DOM directly so 30 frames a second don't re-render React. */
-export function Equalizer() {
+ *  Updates the DOM directly so frames don't re-render React. `fps` is how often Rust sends
+ *  levels: every update costs this window CPU, so the always-visible collapsed pill uses a
+ *  lower rate than the open panel. */
+export function Equalizer({ className = "eq", fps = 30 }: { className?: string; fps?: number }) {
   const bars = useRef<(HTMLSpanElement | null)[]>([]);
   useEffect(() => {
-    invoke("equalizer", { on: true });
-    const un = listen<number[]>("eq", (e) =>
+    invoke("equalizer", { on: true, fps }); // Rust sends at this rate
+    const un = listen<number[]>("eq", (e) => {
       e.payload.forEach((v, i) => {
         const b = bars.current[i];
         if (b) b.style.transform = `scaleY(${0.12 + v * 0.88})`;
-      }),
-    );
+      });
+    });
     return () => {
       invoke("equalizer", { on: false });
       un.then((f) => f());
     };
-  }, []);
+  }, [fps]);
   return (
-    <div className="eq" aria-hidden="true">
+    <div className={className} aria-hidden="true">
       {[0, 1, 2, 3, 4].map((i) => (
         <span key={i} ref={(el) => void (bars.current[i] = el)} />
       ))}

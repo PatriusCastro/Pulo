@@ -163,6 +163,22 @@ function save(key: string, value: unknown) {
   } catch {}
 }
 
+/** Browsers report their own logo as the album art until the page sets a cover (seen with
+ *  Chrome). Logos are round with see-through corners; covers are solid rectangles. */
+async function isAppIcon(blob: Blob) {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const c = new OffscreenCanvas(16, 16);
+    const g = c.getContext("2d")!;
+    g.drawImage(bmp, 0, 0, 16, 16);
+    bmp.close();
+    const a = (x: number, y: number) => g.getImageData(x, y, 1, 1).data[3];
+    return [a(0, 0), a(15, 0), a(0, 15), a(15, 15)].some((v) => v < 250);
+  } catch {
+    return false; // undecodable: let the <img> deal with it
+  }
+}
+
 function chime(ctx: AudioContext) {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
@@ -387,11 +403,17 @@ export default function App() {
   useEffect(() => {
     if (!artRev) return setArt(null);
     let url: string | null = null;
-    invoke<ArrayBuffer>("media_art").then((buf) => {
-      url = buf.byteLength ? URL.createObjectURL(new Blob([buf])) : null;
+    let alive = true;
+    invoke<ArrayBuffer>("media_art").then(async (buf) => {
+      const blob = new Blob([buf]);
+      // An app's logo isn't album art: show nothing (the pet) until the real cover arrives.
+      const keep = buf.byteLength > 0 && !(await isAppIcon(blob));
+      if (!alive) return;
+      url = keep ? URL.createObjectURL(blob) : null;
       setArt(url);
     });
     return () => {
+      alive = false;
       if (url) URL.revokeObjectURL(url);
     };
   }, [artRev]);
@@ -996,6 +1018,10 @@ export default function App() {
                   <span className="mic-off" aria-label="Microphone muted">
                     <Icon d={ICONS.micOff} size={14} />
                   </span>
+                ) : playing && mode === "rest" && has("equalizer") ? (
+                  // Live waveform while the pill is at rest (unmounting it stops the capture).
+                  // Orange while an agent works, so that signal isn't lost under the music.
+                  <Equalizer className={`wave${working.length ? " working" : ""}`} fps={12} />
                 ) : working.length ? (
                   <span className="dot working" aria-label="Agent working" />
                 ) : playing ? (

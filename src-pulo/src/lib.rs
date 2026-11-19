@@ -321,8 +321,12 @@ async fn set_calendar(app: AppHandle, url: String) -> Result<String, String> {
 
 /// The UI turns the equalizer on while the expanded panel shows a playing track.
 #[tauri::command]
-fn equalizer(on: bool) {
-    eq::ON.store(on, std::sync::atomic::Ordering::Relaxed);
+fn equalizer(on: bool, fps: Option<u64>) {
+    use std::sync::atomic::Ordering::Relaxed;
+    if let Some(fps) = fps {
+        eq::INTERVAL_MS.store(1000 / fps.clamp(1, 60), Relaxed);
+    }
+    eq::ON.store(on, Relaxed);
 }
 
 #[tauri::command]
@@ -399,6 +403,18 @@ pub fn run() {
             return;
         }
     }
+    // Release builds abort on panic with no console, so leave a note of where it happened:
+    // %LOCALAPPDATA%\com.pulo.dev\panic.log.
+    std::panic::set_hook(Box::new(|info| {
+        let dir = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join("com.pulo.dev");
+        let _ = fs::create_dir_all(&dir);
+        let thread = thread::current().name().unwrap_or("?").to_string();
+        let line = format!("{} [{thread}] {info}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
+        use std::io::Write;
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(dir.join("panic.log")) {
+            let _ = f.write_all(line.as_bytes());
+        }
+    }));
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

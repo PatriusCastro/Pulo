@@ -361,6 +361,24 @@ button:focus-visible {
   transform: scaleY(0.12);
   transform-origin: bottom;
 }
+/* Collapsed: a small voice-memo style waveform, bars grow from the middle. Moved by JS at
+   ~12 fps (Equalizer fps), never by a CSS animation. */
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.wave span {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: scaleY(0.12);
+}
+.wave.working span {
+  background: #ff9f43;
+}
 /* Expanded: previous / current / next line. The block slides in on each line change. */
 .lyrics {
   margin-top: 6px;

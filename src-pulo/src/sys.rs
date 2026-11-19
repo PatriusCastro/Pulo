@@ -99,7 +99,9 @@ pub fn watch_media() {
         let _ = m.CurrentSessionChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
         let _ = m.SessionsChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
     }
+    use std::time::{Duration, Instant};
     let mut hooked = String::new(); // player whose session events we listen to
+    let mut fast_until = Instant::now();
     loop {
         if let Some(s) = session() {
             let id = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
@@ -112,8 +114,14 @@ pub fn watch_media() {
                 hooked = id;
             }
         }
-        poll_media();
-        let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+        // Browsers swap in the real cover some seconds after a track starts without saying
+        // so (measured: Chrome reports its logo first). Look every second for a while after
+        // a track change, then only on events with a 30 s backstop.
+        if poll_media() {
+            fast_until = Instant::now() + Duration::from_secs(15);
+        }
+        let wait = if Instant::now() < fast_until { Duration::from_secs(1) } else { Duration::from_secs(30) };
+        let _ = rx.recv_timeout(wait);
         std::thread::sleep(std::time::Duration::from_millis(60)); // let a burst of events land
         while rx.try_recv().is_ok() {}
     }
@@ -131,7 +139,8 @@ fn read_art(p: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Res
 
 /// Read the current player and push it to the UI if anything changed. Called by
 /// watch_media on player events, and by media_control right after a button press.
-pub fn poll_media() {
+/// Returns true when a different track started.
+pub fn poll_media() -> bool {
     let cur = session().and_then(|s| {
         let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
         let status = s.GetPlaybackInfo().ok()?.PlaybackStatus().ok()?;
@@ -148,20 +157,28 @@ pub fn poll_media() {
     let new = cur.map(|(title, artist, playing, p, (duration_ms, position_ms, position_at))| {
         let same_track = old.as_ref().is_some_and(|o| o.title == title && o.artist == artist);
         let mut art_rev = old.as_ref().map_or(0, |o| o.art_rev);
-        // Players often publish the art a moment after the title, so retry while it's missing.
-        if !same_track || ART.lock().unwrap().is_empty() {
-            let bytes = read_art(&p).unwrap_or_default();
-            if !same_track || !bytes.is_empty() {
-                *ART.lock().unwrap() = bytes;
-                art_rev += 1;
-            }
+        // Players often publish the art after the title, and browsers first report their own
+        // app icon as the art until the page sets the cover. So re-read on every change (this
+        // only runs on player events) and swap whenever the image differs.
+        let bytes = read_art(&p).unwrap_or_default();
+        let mut art = ART.lock().unwrap();
+        if !same_track || (!bytes.is_empty() && *art != bytes) {
+            *art = bytes;
+            art_rev += 1;
         }
+        drop(art);
         Media { title, artist, playing, art_rev, duration_ms, position_ms, position_at }
     });
+    let new_track = match (&old, &new) {
+        (Some(o), Some(n)) => o.title != n.title || o.artist != n.artist,
+        (None, Some(_)) => true,
+        _ => false,
+    };
     if new != old {
         STATE.lock().unwrap().media = new;
         emit_state();
     }
+    new_track
 }
 
 pub fn media_control(action: &str) {

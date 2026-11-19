@@ -316,7 +316,11 @@ button:focus-visible {
   flex: none;
 }
 .art.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--chip);
+  color: rgba(245, 245, 245, 0.35);
 }
 .meta {
   flex: 1;
@@ -403,16 +407,34 @@ button:focus-visible {
 .icon-btn.on {
   color: var(--accent);
 }
-.music-btn {
-  margin-top: 6px;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--dim);
-  background: var(--chip);
+/* Now: song, then its position bar with the music page button at its end. */
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.music-btn:hover {
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.player-row .progress-row {
+  flex: 1;
+}
+.music-open {
+  margin-left: auto;
+}
+.music-open:hover {
   color: var(--fg);
+}
+.controls .play {
+  width: 40px;
+  height: 40px;
+  background: var(--fg);
+  color: #000;
+}
+.controls .play:hover {
+  background: #fff;
 }
 .progress-row,
 .music-row {
@@ -456,10 +478,10 @@ button:focus-visible {
 .music-row .icon-btn:last-child {
   margin-left: auto;
 }
+/* No padding: it would show a sliver of the line scrolled out above. */
 .lyrics-panel {
   overflow: hidden;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 4px;
 }
 .lyrics-scroll {
   transition: transform 0.3s ease;
@@ -576,15 +598,23 @@ button:focus-visible {
 .item:hover .remove {
   opacity: 1;
 }
+/* Sits with the status bar at the bottom, so the free space stays in one place. */
+.tab-body > .shelf {
+  margin-top: auto;
+}
+/* A hint, not a feature: low and quiet until there's something on the shelf. */
+.shelf:has(.shelf-empty) {
+  height: 34px;
+}
 .shelf-empty {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
   border-radius: 10px;
-  color: var(--dim);
+  color: rgba(245, 245, 245, 0.45);
   font-size: 12px;
 }
 .hud-text {
@@ -620,21 +650,23 @@ button:focus-visible {
 }
 
 /* focus */
+/* Fills the space above the quick timer, timer and controls centred in it. */
 .focus {
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 2px 4px 0;
+  gap: 22px;
+  padding: 0 6px;
 }
 .ring {
   position: relative;
   flex: none;
-  width: 92px;
-  height: 92px;
+  width: 120px;
+  height: 120px;
 }
 .ring circle {
   fill: none;
-  stroke-width: 6;
+  stroke-width: 5;
 }
 .ring .track {
   stroke: var(--chip);
@@ -653,36 +685,77 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 28px;
   font-weight: 600;
+  letter-spacing: -0.02em;
 }
 .focus-side {
   flex: 1;
   min-width: 0;
 }
 .phase-label {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
+}
+/* One dot per focus round in the cycle: done, current, still to come. */
+.rounds {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+}
+.rounds span:not(.sub) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chip);
+}
+.rounds span.done {
+  background: var(--accent);
+}
+.rounds span.now {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.rounds .sub {
+  margin-left: 6px;
+  font-size: 12px;
 }
 .focus-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 12px;
+  gap: 4px;
+  margin-top: 16px;
 }
 .focus-controls button {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
+  color: var(--dim);
+}
+.focus-controls button:hover {
+  color: var(--fg);
 }
 .focus-controls .primary {
   width: auto;
   gap: 6px;
-  padding: 0 14px;
+  padding: 0 18px 0 14px;
+  margin-right: 4px;
   background: var(--chip);
+  color: var(--fg);
   font-weight: 600;
 }
 .focus-controls .primary:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+/* Start / Resume: the one thing to press, in the phase's colour. */
+.focus-controls .primary.go {
+  background: var(--accent);
+  color: #000;
+}
+.focus-controls .primary.go.break {
+  background: #5ac8fa;
+}
+.focus-controls .primary.go:hover {
+  filter: brightness(1.1);
 }
 
 /* agents */

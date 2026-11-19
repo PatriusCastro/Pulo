@@ -715,8 +715,8 @@ export default function App() {
       <button aria-label="Previous" onClick={() => invoke("media", { action: "prev" })}>
         <Icon d={ICONS.prev} size={20} />
       </button>
-      <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
-        <Icon d={playing ? ICONS.pause : ICONS.play} size={26} />
+      <button className="play" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
+        <Icon d={playing ? ICONS.pause : ICONS.play} size={22} />
       </button>
       <button aria-label="Next" onClick={() => invoke("media", { action: "next" })}>
         <Icon d={ICONS.next} size={20} />
@@ -727,27 +727,30 @@ export default function App() {
     setShowLyrics(!showLyrics);
     save("showLyrics", !showLyrics);
   };
+  const progressEl = media && (
+    <Progress
+      duration={media.duration_ms}
+      position={media.position_ms}
+      at={media.position_at}
+      playing={playing}
+      canSeek={media.can_seek}
+      onSeek={(ms) => invoke("media", { action: "seek", value: Math.round(ms) })}
+    />
+  );
   const musicEl = media && (
     <div className="music">
       <div className="media">
         <button className="icon-btn" aria-label="Back" onClick={() => setMusicPage(false)}>
           <Icon d={ICONS.back} size={16} />
         </button>
-        {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty" />}
+        {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty"><Icon d={ICONS.music} size={18} /></div>}
         <div className="meta">
           <div className="title">{media.title || "Unknown title"}</div>
           <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
         </div>
         {transport}
       </div>
-      <Progress
-        duration={media.duration_ms}
-        position={media.position_ms}
-        at={media.position_at}
-        playing={playing}
-        canSeek={media.can_seek}
-        onSeek={(ms) => invoke("media", { action: "seek", value: Math.round(ms) })}
-      />
+      {progressEl}
       <div className="music-row">
         {media.shuffle !== null && (
           <button className={`icon-btn${media.shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={media.shuffle} onClick={() => invoke("media", { action: "shuffle" })}>
@@ -785,7 +788,7 @@ export default function App() {
         )}
       </div>
       {lyricsOn && showLyrics && (
-        lyrics.length ? <LyricsPanel lines={lyrics} i={li} rows={5} /> : <div className="lyrics-none">No synced lyrics for this song</div>
+        lyrics.length ? <LyricsPanel lines={lyrics} i={li} rows={6} /> : <div className="lyrics-none">No synced lyrics for this song</div>
       )}
     </div>
   );
@@ -793,19 +796,24 @@ export default function App() {
   const nowTab = musicPage && musicEl ? musicEl : (
     <>
       {media ? (
-        <div className="media">
-          {art ? <img className="art" src={art} alt="" /> : <div className="art empty" />}
-          <div className="meta">
-            <div className="title">{media.title || "Unknown title"}</div>
-            <div className="sub-row">
-              <div className="sub">{media.artist}</div>
-              {isOpen && playing && has("equalizer") && <Equalizer />}
+        <div className="player">
+          <div className="media">
+            {art ? <img className="art" src={art} alt="" /> : <div className="art empty"><Icon d={ICONS.music} size={28} /></div>}
+            <div className="meta">
+              <div className="title">{media.title || "Unknown title"}</div>
+              <div className="sub-row">
+                <div className="sub">{media.artist}</div>
+                {isOpen && playing && has("equalizer") && <Equalizer />}
+              </div>
             </div>
-            <button className="music-btn" onClick={() => setMusicPage(true)}>
-              <Icon d={ICONS.music} size={12} /> Music
+            {transport}
+          </div>
+          <div className="player-row">
+            {progressEl}
+            <button className="icon-btn music-open" aria-label="Music: lyrics, volume, shuffle" title="Lyrics, volume, shuffle" onClick={() => setMusicPage(true)}>
+              <Icon d={ICONS.lyrics} size={16} />
             </button>
           </div>
-          {transport}
         </div>
       ) : (
         <div className="idle">
@@ -872,11 +880,12 @@ export default function App() {
   );
 
   const RING = 2 * Math.PI * 40;
+  const roundNow = Math.min(pomo.phase === "focus" ? pomo.round + 1 : pomo.round, cfg.every);
   const focusTab = (
     <>
       <div className="focus">
         <div className="ring">
-          <svg width="92" height="92" viewBox="0 0 92 92" aria-hidden="true">
+          <svg width="120" height="120" viewBox="0 0 92 92" aria-hidden="true">
             <circle cx="46" cy="46" r="40" className="track" />
             <circle
               cx="46"
@@ -892,11 +901,14 @@ export default function App() {
         </div>
         <div className="focus-side">
           <div className={`phase-label ${phaseCls}`}>{P.LABEL[pomo.phase]}</div>
-          <div className="sub">
-            Round {Math.min(pomo.phase === "focus" ? pomo.round + 1 : pomo.round, cfg.every)} of {cfg.every} · {doneToday} done today
+          <div className="rounds" role="img" aria-label={`Round ${roundNow} of ${cfg.every}`}>
+            {Array.from({ length: cfg.every }, (_, k) => (
+              <span key={k} className={k < pomo.round ? "done" : k === pomo.round && pomo.phase === "focus" ? "now" : ""} />
+            ))}
+            <span className="sub">{doneToday ? `${doneToday} done today` : `Round ${roundNow} of ${cfg.every}`}</span>
           </div>
           <div className="focus-controls">
-            <button className="primary" onClick={pomoRunning ? pomoPause : pomoStart}>
+            <button className={pomoRunning ? "primary" : `primary go ${phaseCls}`} onClick={pomoRunning ? pomoPause : pomoStart}>
               <Icon d={pomoRunning ? ICONS.pause : ICONS.play} size={16} />
               {pomoRunning ? "Pause" : pomoActive ? "Resume" : "Start"}
             </button>

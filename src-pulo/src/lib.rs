@@ -67,14 +67,19 @@ fn apply_region(w: &WebviewWindow, s: f64) {
     let pill_w = r.w.min(MAX.0);
     let radius = if r.h <= 36.0 { r.h / 2.0 } else { 30.0 };
     let x0 = (px(MAX.0, s) - px(pill_w, s)) / 2;
+    // Regions are whole pixels with no anti-aliasing. Cut exactly on the pill's edge, they
+    // chop off the webview's smooth edge and leave stairs, so leave a little transparent
+    // margin around every shape for that edge to fade out in.
+    let m = px(2.0, s);
     unsafe {
         // +1: GDI leaves out the right and bottom edges of round regions.
-        let rgn = CreateRoundRectRgn(x0, 0, x0 + px(pill_w, s) + 1, px(r.h, s) + 1, px(radius * 2.0, s), px(radius * 2.0, s));
+        let d = px(radius * 2.0, s) + 2 * m;
+        let rgn = CreateRoundRectRgn(x0 - m, 0, x0 + px(pill_w, s) + m + 1, px(r.h, s) + m + 1, d, d);
         // 40 px buttons, 4 px into each 48 px column, rows every 48 px from y = 6.
         for (n, x) in [(r.left, 4.0), (r.right, MAX.0 - 44.0)] {
             for row in 0..n.min(MAX_SHORTCUTS) {
                 let y = 6.0 + row as f64 * 48.0;
-                let b = CreateEllipticRgn(px(x, s), px(y, s), px(x + 40.0, s) + 1, px(y + 40.0, s) + 1);
+                let b = CreateEllipticRgn(px(x, s) - m, px(y, s) - m, px(x + 40.0, s) + m + 1, px(y + 40.0, s) + m + 1);
                 CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
                 let _ = DeleteObject(b.into());
             }
@@ -255,14 +260,20 @@ fn over_pill(w: &WebviewWindow, r: Region) -> bool {
     (x0..x0 + px(r.w, s)).contains(&c.x) && (win.top..win.top + px(r.h, s)).contains(&c.y)
 }
 
-/// Let clicks through the whole window (layered + transparent), or take them again.
-fn set_through(w: &WebviewWindow, on: bool) {
-    let bits = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as isize;
+/// Click-through needs the window layered and transparent. Layered stays on for as long as
+/// the mode is: taking it off rebuilds the window's surface, which comes back white behind
+/// the pill. So switching between passing clicks and taking them only flips transparent.
+fn set_through(w: &WebviewWindow, layered: bool, through: bool) {
+    let set = |ex: isize, bit: WINDOW_EX_STYLE, on: bool| if on { ex | bit.0 as isize } else { ex & !(bit.0 as isize) };
     unsafe {
         let h = hwnd(w);
-        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-        SetWindowLongPtrW(h, GWL_EXSTYLE, if on { ex | bits } else { ex & !bits });
-        if on {
+        let old = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        let ex = set(set(old, WS_EX_LAYERED, layered), WS_EX_TRANSPARENT, through);
+        if ex == old {
+            return;
+        }
+        SetWindowLongPtrW(h, GWL_EXSTYLE, ex);
+        if layered && old & WS_EX_LAYERED.0 as isize == 0 {
             // A layered window draws nothing until it has an opacity.
             let _ = SetLayeredWindowAttributes(h, windows::Win32::Foundation::COLORREF(0), 255, LWA_ALPHA);
         }
@@ -273,22 +284,28 @@ fn set_through(w: &WebviewWindow, on: bool) {
 /// Click-through mode: at rest (or peeking) the island passes clicks to whatever is under
 /// it, a browser's tabs say, and fades while the mouse is over it. Holding Ctrl makes it
 /// take clicks again, and once open (Ctrl+click or the keyboard shortcut) it works as usual.
+/// A button held down over it (dragging files in) also lets it take the drop. A click that
+/// started on whatever is underneath still lands there: that window already has the mouse.
 // ponytail: polls at 20 Hz while the mode is on; a low-level mouse hook if that ever shows up.
 fn watch_click_through(w: WebviewWindow) {
     use tauri::Emitter;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
-    let (mut through, mut dim) = (false, false);
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_LBUTTON};
+    let (mut layered, mut through, mut dim) = (false, false, false);
     loop {
         let on = CLICK_THROUGH.load(std::sync::atomic::Ordering::Relaxed);
         let r = *REGION.lock().unwrap();
-        let ctrl = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) } < 0;
-        let t = on && r.h <= 36.0 && !ctrl;
+        let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
+        let over = on && over_pill(&w, r);
+        let t = on && r.h <= 36.0 && !key(VK_CONTROL) && !(over && key(VK_LBUTTON));
+        if on != layered || t != through {
+            set_through(&w, on, t);
+            layered = on;
+        }
         if t != through {
             through = t;
-            set_through(&w, t);
             let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
         }
-        let d = t && over_pill(&w, r);
+        let d = t && over;
         if d != dim {
             dim = d;
             let _ = w.emit("dim", d);

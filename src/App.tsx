@@ -273,6 +273,7 @@ export default function App() {
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
   const [faded, setFaded] = useState(false); // click-through mode, mouse over the pill
+  const [dropping, setDropping] = useState(false); // files are being dragged over the island
   const [cheerUntil, setCheerUntil] = useState(0);
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
@@ -429,16 +430,30 @@ export default function App() {
         if (on("tools"))
           showHud({ kind: "mic", level: 1, flag: e.payload, text: e.payload ? "Microphone muted" : "Microphone on", icon: e.payload ? ICONS.micOff : ICONS.mic }, 2500);
       }),
-      // Files dragged onto the pill: open it while hovering, add them to the shelf on drop.
+      // Files dragged onto the pill: open it as one big drop zone, add them to the shelf on drop
+      // and show them there. Opening reshapes the window, which can make Windows report a
+      // "leave" mid-drag, so a leave waits a second and any further movement cancels it.
       getCurrentWebview().onDragDropEvent((e) => {
+        if (!on("shelf")) return;
         const t = e.payload.type;
-        if (t === "enter") {
+        if (t === "enter" || t === "over") {
           clearTimeout(leave.current);
-          go("open");
+          if (t === "enter") {
+            setDropping(true);
+            go("open");
+          }
         } else if (t === "drop") {
-          if (on("shelf")) addToShelf(e.payload.paths);
-          collapseSoon(1500); // no mouse events fire during a drag; the next mouseenter cancels this
-        } else if (t === "leave") collapseSoon(150);
+          setDropping(false);
+          addToShelf(e.payload.paths);
+          pickTab("now");
+          collapseSoon(2500); // no mouse events fire during a drag; the next mouseenter cancels this
+        } else if (t === "leave") {
+          clearTimeout(leave.current);
+          leave.current = window.setTimeout(() => {
+            setDropping(false);
+            go("rest");
+          }, 1000);
+        }
       }),
     ];
     return () => un.forEach((p) => p.then((f) => f()));
@@ -1196,6 +1211,13 @@ export default function App() {
                     ? agentsTab
                     : toolsTab}
           </div>
+          {dropping && (
+            <div className="drop-zone" aria-hidden>
+              <Icon d={ICONS.shelf} size={28} />
+              <b>Drop to add to the shelf</b>
+              <span>The file stays in its folder. Click it on the shelf to open it, or drag it out into any app.</span>
+            </div>
+          )}
         </div>
       </div>
       {side(prefs.right)}

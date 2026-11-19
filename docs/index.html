@@ -80,16 +80,25 @@ nav a:hover { color: var(--ink); }
   font: 700 1rem/1 "Hanken Grotesk", sans-serif; text-decoration: none; cursor: pointer;
   transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s;
 }
-.btn.primary { background: var(--coral); color: var(--coral-ink); box-shadow: 0 6px 18px -6px rgba(217, 72, 43, .55); }
-.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -8px rgba(217, 72, 43, .6); }
+.btn.primary { background: var(--coral); color: var(--coral-ink); box-shadow: 0 4px 12px -4px rgba(0, 0, 0, .3); }
+.btn.primary:hover { transform: translateY(-2px); box-shadow: 0 10px 20px -8px rgba(0, 0, 0, .35); }
 .btn.ghost { color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
 .btn.ghost:hover { background: var(--ink); color: var(--sand); }
 .btn svg.i { width: 20px; height: 20px; }
 
 /* Hero */
-.hero { padding-top: 48px; }
+.hero { padding-top: 48px; position: relative; }
+.postmark {
+  position: absolute; right: 40px; top: 44px; width: 232px; height: 232px;
+  color: var(--coral); transform: rotate(-11deg);
+}
+.postmark text { font: 400 12.5px "JetBrains Mono", monospace; letter-spacing: 2.6px; fill: currentColor; }
+.postmark .big { font: 400 30px Gloock, Georgia, serif; letter-spacing: 0; }
+.postmark .wavy { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+@media (max-width: 1000px) { .postmark { width: 168px; height: 168px; right: 16px; top: 28px; } }
+@media (max-width: 760px) { .postmark { display: none; } }
 .hero h1 { font-size: clamp(3rem, 8.5vw, 6rem); max-width: 11ch; }
-.hero h1 em { font-style: italic; color: var(--sea); }
+.hero h1 em { font-style: normal; color: var(--sea); }
 .lede { margin-top: 24px; font-size: clamp(1.125rem, 2vw, 1.375rem); color: var(--ink-2); max-width: 36ch; }
 .cta { margin-top: 32px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .cta .note { font-size: .9rem; color: var(--ink-2); margin-left: 6px; }
@@ -102,7 +111,7 @@ nav a:hover { color: var(--ink); }
   background:
     radial-gradient(120% 90% at 50% -10%, rgba(92, 198, 185, .35), transparent 60%),
     linear-gradient(to bottom, var(--screen), #0b2321);
-  min-height: 340px;
+  min-height: 400px;
   padding: 14px 16px 32px;
   display: flex; flex-direction: column; align-items: center;
   overflow: hidden;
@@ -112,14 +121,33 @@ nav a:hover { color: var(--ink); }
   font: 400 .8rem/1.2 "JetBrains Mono", monospace; color: rgba(233, 243, 239, .55); text-align: right;
 }
 .pill {
-  background: var(--pill); color: #f5f5f5;
+  background: var(--pill); color: #f5f5f5; border: 0; cursor: pointer; text-align: left;
+  font: 400 .95rem/1.3 "Hanken Grotesk", sans-serif;
   height: 44px; border-radius: 22px;
   display: flex; align-items: center; gap: 10px; padding: 0 10px;
   box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .6);
-  transition: width .55s cubic-bezier(.22, 1, .36, 1);
+  transition: width .55s cubic-bezier(.22, 1, .36, 1), height .55s cubic-bezier(.22, 1, .36, 1), border-radius .55s cubic-bezier(.22, 1, .36, 1), padding .55s cubic-bezier(.22, 1, .36, 1);
   overflow: hidden; white-space: nowrap;
-  font-size: .95rem;
 }
+.pill:hover { box-shadow: 0 14px 36px -10px rgba(0, 0, 0, .75); }
+.pill.open { height: 236px; border-radius: 32px; padding: 18px 20px; align-items: stretch; cursor: default; }
+.pill.open .pill-inner { flex-direction: column; align-items: stretch; gap: 12px; white-space: normal; }
+.o-row { display: flex; align-items: center; gap: 12px; }
+.o-art { width: 48px; height: 48px; border-radius: 10px; flex: none; }
+.o-meta { flex: 1; min-width: 0; line-height: 1.25; }
+.o-meta b { display: block; font-weight: 700; }
+.o-ctl { display: flex; align-items: center; gap: 10px; }
+.o-ctl svg { width: 20px; height: 20px; fill: #f5f5f5; }
+.o-ctl .play { width: 34px; height: 34px; border-radius: 50%; background: #f5f5f5; display: grid; place-items: center; }
+.o-ctl .play svg { fill: #000; width: 18px; height: 18px; }
+.o-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .2); overflow: hidden; }
+.o-bar span { display: block; height: 100%; width: 38%; background: #f5f5f5; border-radius: 2px; }
+.o-lyrics { flex: 1; min-height: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.o-lyrics ol { list-style: none; margin: 0; padding: 0; transition: transform .6s cubic-bezier(.22, 1, .36, 1); }
+.o-lyrics li { font: 700 1.3rem/1.2 "Hanken Grotesk", sans-serif; letter-spacing: -.01em; color: rgba(255, 255, 255, .32); padding: 3px 0; transition: color .4s; }
+.o-lyrics li.past { color: rgba(255, 255, 255, .5); }
+.o-lyrics li.now { color: #fff; }
+.pill.open.tinted { background: linear-gradient(to bottom, #5a2216 0%, #2c0f12 100%); }
 .pill-inner { display: flex; align-items: center; gap: 10px; width: 100%; transition: opacity .2s, filter .2s; }
 .pill.swap .pill-inner { opacity: 0; filter: blur(4px); }
 .pill .dot { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; }
@@ -134,7 +162,7 @@ nav a:hover { color: var(--ink); }
 .wave span:nth-child(4) { animation-delay: -.15s; animation-duration: .8s; }
 .wave span:nth-child(5) { animation-delay: -.45s; animation-duration: .95s; }
 @keyframes wave { to { transform: scaleY(1); } }
-.states { margin-top: auto; padding-top: 72px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.states { margin-top: auto; padding-top: 36px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .states button {
   font: 500 .9rem/1 "Hanken Grotesk", sans-serif; color: #e9f3ef;
   background: rgba(255, 255, 255, .08); border: 0; border-radius: 999px; padding: 10px 16px; cursor: pointer;
@@ -147,9 +175,9 @@ nav a:hover { color: var(--ink); }
 
 /* Sections */
 section { padding: 112px 0 0; }
-.head { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px 64px; align-items: end; margin-bottom: 48px; }
-.head h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); }
-.head p { color: var(--ink-2); max-width: 46ch; }
+.head { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 24px 64px; align-items: end; margin-bottom: 56px; }
+.head h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); max-width: 16ch; }
+.head p { color: var(--ink-2); max-width: 42ch; padding-bottom: 6px; }
 @media (max-width: 760px) { .head { grid-template-columns: minmax(0, 1fr); } section { padding-top: 80px; } }
 
 /* Itinerary */
@@ -157,6 +185,13 @@ section { padding: 112px 0 0; }
 .day li { display: grid; grid-template-columns: 110px minmax(0, 4fr) minmax(0, 6fr); gap: 8px 40px; padding: 26px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
 .day time { font: 400 .95rem/1 "JetBrains Mono", monospace; color: var(--sea); font-variant-numeric: tabular-nums; }
 .day h3 { font-size: 1.75rem; }
+.mini { margin-top: 14px; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 6px; border-radius: 16px; background: var(--pill); color: #f5f5f5; font-size: .84rem; white-space: nowrap; max-width: 100%; box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .5); }
+.mini .dot { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #000; flex: none; }
+.mini .dot svg { width: 12px; height: 12px; fill: currentColor; }
+.mini .dim { color: #9aa5a3; }
+.mini .tag { font: 400 .8rem/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+.mini .lyr { font-weight: 700; }
+.mini .low { color: #ff6b5a; font-weight: 700; }
 .day p { color: var(--ink-2); max-width: 52ch; }
 @media (max-width: 760px) { .day li { grid-template-columns: minmax(0, 1fr); } }
 
@@ -192,11 +227,11 @@ section { padding: 112px 0 0; }
 }
 .ticket > div { padding: 44px; }
 .ticket h2 { font-size: clamp(2.25rem, 5vw, 3.75rem); margin-bottom: 16px; }
-.ticket p { color: rgba(243, 234, 217, .85); max-width: 44ch; }
+.ticket p { color: rgba(243, 234, 217, .95); max-width: 44ch; }
 .ticket .btn.primary { margin-top: 28px; }
 .stub { border-left: 2px dashed rgba(243, 234, 217, .35); font-size: .95rem; }
 .stub dl { margin: 0; display: grid; gap: 16px; }
-.stub dt { font: 400 .78rem/1 "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .08em; color: rgba(243, 234, 217, .65); margin-bottom: 4px; }
+.stub dt { font: 400 .78rem/1 "JetBrains Mono", monospace; text-transform: uppercase; letter-spacing: .08em; color: rgba(243, 234, 217, .88); margin-bottom: 4px; }
 .stub dd { margin: 0; }
 :root[data-theme="dark"] .ticket, :root[data-theme="dark"] .ticket h2 { color: #f3ead9; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ticket { background: #0f5f59; } }
@@ -225,7 +260,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .wave span { animation: none; transform: scaleY(.7); }
-  .pill, .pill-inner, .btn { transition: none; }
+  .pill, .pill-inner, .btn, .o-lyrics ol { transition: none; }
 }
 </style>
 </head>
@@ -234,6 +269,9 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
   <symbol id="i-dl" viewBox="0 0 24 24"><path d="M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z"/></symbol>
   <symbol id="i-gh" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.3-3.4-1.3-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 2.9.8.1-.7.4-1.1.6-1.3-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.8 1a9.6 9.6 0 0 1 5 0c1.9-1.3 2.8-1 2.8-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7.9.7 1.9V21c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 6h2v12h-2zm-10 12 8.5-6L6 6z"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M12 3v10.6A4 4 0 1 0 14 17V7h4V3z"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4h-2v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></symbol>
   <symbol id="i-timer" viewBox="0 0 24 24"><path d="M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></symbol>
   <symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></symbol>
@@ -255,6 +293,15 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
 
 <main id="top">
   <div class="hero wrap">
+    <svg class="postmark" viewBox="0 0 200 200" aria-hidden="true">
+      <defs><path id="ring" d="M100 100m-74 0a74 74 0 1 1 148 0a74 74 0 1 1-148 0"/></defs>
+      <circle cx="100" cy="100" r="94" fill="none" stroke="currentColor" stroke-width="2.5"/>
+      <circle cx="100" cy="100" r="62" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <text><textPath href="#ring">PULO ISLAND · POP. 1 SONG · EST. 2026 ·</textPath></text>
+      <rect x="62" y="70" width="76" height="26" rx="13" fill="currentColor"/>
+      <circle cx="76" cy="83" r="5" fill="var(--sand)"/>
+      <text class="big" x="100" y="128" text-anchor="middle">Pulo</text>
+    </svg>
     <h1>The smallest island on <em>Windows</em>.</h1>
     <p class="lede">Pulo is a Dynamic Island for your PC. Population: one song, one meeting, and whatever you just downloaded.</p>
     <div class="cta">
@@ -264,7 +311,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
     </div>
 
     <div class="postcard" aria-label="Live preview of the island">
-      <div class="pill" id="pill" aria-live="polite"><div class="pill-inner" id="pill-inner"></div></div>
+      <button type="button" class="pill" id="pill" aria-expanded="false" aria-label="The island. Click to open it."><span class="pill-inner" id="pill-inner"></span></button>
       <div class="states" role="group" aria-label="Show the island with">
         <button type="button" data-state="music" aria-pressed="true">Music</button>
         <button type="button" data-state="meeting" aria-pressed="false">Next meeting</button>
@@ -272,7 +319,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
         <button type="button" data-state="focus" aria-pressed="false">Focus</button>
         <button type="button" data-state="agent" aria-pressed="false">AI agent</button>
       </div>
-      <p class="caption" id="caption">Wish you were here. (You are. It's at the top of your screen.)</p>
+      <p class="caption" id="caption" aria-live="polite">Wish you were here. Click the island to open it.</p>
       <p class="stamp" aria-hidden="true">GREETINGS FROM<br>THE TOP OF YOUR SCREEN</p>
     </div>
   </div>
@@ -284,13 +331,13 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
         <p>Pulo sits quietly at the top of your screen and speaks up only when something's worth it. Hover to peek, click to open, or press Ctrl+Alt+Space.</p>
       </div>
       <ol class="day">
-        <li><time>08:58</time><h3>Morning laps</h3><p>A focus timer with rounds, short breaks and a long one. The ring empties as you work. The island won't stop you opening social media, but it will remember.</p></li>
-        <li><time>09:45</time><h3>The tide warns you</h3><p>Fifteen minutes before your standup, the island clears its throat. Paste any iCal link: Google, Outlook, whatever you use.</p></li>
-        <li><time>12:30</time><h3>Beach karaoke</h3><p>Synced lyrics in big, bold lines on a background tinted by the album cover. Tap a line to jump there. Works with Spotify, your browser and anything else that talks to Windows media controls.</p></li>
-        <li><time>14:10</time><h3>Cargo arrives</h3><p>Finished downloads dock on the shelf. Drop files on the island to keep them handy, then drag them out wherever they need to go.</p></li>
-        <li><time>16:20</time><h3>Low tide</h3><p>Your headphones are at 12%. The island tells you before they do, and it watches your Bluetooth mouse and keyboard too.</p></li>
-        <li><time>17:59</time><h3>The agent sails home</h3><p>Claude Code finished that long task you forgot about. The island taps you on the shoulder and shows today's token count.</p></li>
-        <li><time>Any time</time><h3>Local amenities</h3><p>Dark mode, mic mute, keep awake, lock, the Recycle Bin, system stats, and up to ten shortcuts beside the open island.</p></li>
+        <li><time>08:58</time><div><h3>Morning laps</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#ff9f43"><svg><use href="#i-timer"/></svg></span>Focus <span class="tag">24:12</span></span></div><p>A focus timer with rounds, short breaks and a long one. The ring empties as you work. The island won't stop you opening social media, but it will remember.</p></li>
+        <li><time>09:45</time><div><h3>The tide warns you</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#5ac8fa"><svg><use href="#i-bell"/></svg></span>Standup <span class="dim">in 15 min</span></span></div><p>Fifteen minutes before your standup, the island clears its throat. Paste any iCal link: Google, Outlook, whatever you use.</p></li>
+        <li><time>12:30</time><div><h3>Beach karaoke</h3><span class="mini" aria-hidden="true"><span class="dot art"></span><span class="lyr">We live at the top of the screen</span></span></div><p>Synced lyrics in big, bold lines on a background tinted by the album cover. Tap a line to jump there. Works with Spotify, your browser and anything else that talks to Windows media controls.</p></li>
+        <li><time>14:10</time><div><h3>Cargo arrives</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#3ddc84"><svg><use href="#i-dl"/></svg></span>tickets.pdf <span class="dim">saved</span></span></div><p>Finished downloads dock on the shelf. Drop files on the island to keep them handy, then drag them out wherever they need to go.</p></li>
+        <li><time>16:20</time><div><h3>Low tide</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#e9f3ef"><svg><use href="#i-head"/></svg></span>Buds <span class="low">12%</span></span></div><p>Your headphones are at 12%. The island tells you before they do, and it watches your Bluetooth mouse and keyboard too.</p></li>
+        <li><time>17:59</time><div><h3>The agent sails home</h3><span class="mini" aria-hidden="true"><span class="dot" style="background:#d97757"><svg><use href="#i-agent"/></svg></span>Agent done <span class="tag dim">4m 12s</span></span></div><p>Claude Code finished that long task you forgot about. The island taps you on the shoulder and shows today's token count.</p></li>
+        <li><time>Any time</time><div><h3>Local amenities</h3></div><p>Dark mode, mic mute, keep awake, lock, the Recycle Bin, system stats, and up to ten shortcuts beside the open island.</p></li>
       </ol>
     </div>
   </section>
@@ -330,7 +377,7 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: 
       </div>
       <div class="customs">
         <div><h3>Lyrics</h3><p>The song's title, artist and length go to lrclib.net to find synced lyrics. One switch in Settings turns it off.</p></div>
-        <div><h3>Calendar</h3><p>Fetches the iCal link you paste, every 10 minutes. No link, no fetching.</p></div>
+        <div><h3>Calendar</h3><p>Fetches the iCal link you paste, every 10 minutes. Leave the field empty and it fetches nothing.</p></div>
         <div><h3>Updates</h3><p>Asks GitHub whether a new version is out. Updates are signed, so the island installs only real ones.</p></div>
       </div>
       <p class="declared">Nothing else to declare. The AI agent tracker reads Claude Code's logs on your disk and never sends them anywhere.</p>
@@ -396,7 +443,7 @@ npm run check  <span class="c"># before you open a PR</span></code></pre>
 <script>
 const icon = (id, size = 15) => `<svg class="i" style="width:${size}px;height:${size}px"><use href="#i-${id}"/></svg>`;
 const STATES = {
-  music: { w: 300, caption: "Wish you were here. (You are. It's at the top of your screen.)",
+  music: { w: 300, caption: "Wish you were here. Click the island to open it.",
     html: `<span class="dot art"></span><span class="grow">Island Time <span class="dim">· The Locals</span></span><span class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>` },
   meeting: { w: 280, caption: "Fifteen minutes' warning. Enough time for coffee, not enough for a second one.",
     html: `<span class="dot" style="background:#5ac8fa;color:#000">${icon("bell")}</span><span class="grow">Standup <span class="dim">in 15 min</span></span>` },
@@ -407,18 +454,53 @@ const STATES = {
   agent: { w: 300, caption: "Claude Code finished while you were at lunch.",
     html: `<span class="dot" style="background:#d97757;color:#000">${icon("agent")}</span><span class="grow">Agent done <span class="dim">· pulo</span></span><span class="tag dim">4m 12s</span>` },
 };
+const LYRICS = ["Turn the volume low", "The tide is coming in", "We live at the top of the screen", "Where the notifications swim", "♪", "Hover once, and we're open"];
+const OPEN = `<span class="o-row"><span class="o-art art"></span><span class="o-meta"><b>Island Time</b><span class="dim">The Locals</span></span>
+  <span class="o-ctl" aria-hidden="true">${icon("prev", 20)}<span class="play">${icon("pause", 18)}</span>${icon("next", 20)}</span></span>
+  <span class="o-bar"><span></span></span>
+  <span class="o-lyrics"><ol>${LYRICS.map((l) => `<li>${l}</li>`).join("")}</ol></span>`;
 const pill = document.getElementById("pill"), inner = document.getElementById("pill-inner"), caption = document.getElementById("caption");
 const buttons = [...document.querySelectorAll("[data-state]")];
 const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-let current = "music", timer;
+let current = "music", open = false, timer, lyricTimer;
+const fit = (w) => Math.min(w, pill.parentElement.clientWidth - 24) + "px";
+function swap(html, after) {
+  pill.classList.add("swap");
+  setTimeout(() => { inner.innerHTML = html; pill.classList.remove("swap"); after?.(); }, still ? 0 : 200);
+}
 function show(name) {
+  setOpen(false, true);
   current = name;
   const s = STATES[name];
   buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.state === name));
   caption.textContent = s.caption;
-  pill.style.width = Math.min(s.w, pill.parentElement.clientWidth - 24) + "px";
-  pill.classList.add("swap");
-  setTimeout(() => { inner.innerHTML = s.html; pill.classList.remove("swap"); }, still ? 0 : 200);
+  pill.style.width = fit(s.w);
+  swap(s.html);
+}
+function setLyric(i) {
+  const lines = [...inner.querySelectorAll(".o-lyrics li")];
+  if (!lines.length) return;
+  lines.forEach((l, k) => l.className = k === i ? "now" : k < i ? "past" : "");
+  inner.querySelector(".o-lyrics ol").style.transform = `translateY(${-lines[Math.max(0, i - 1)].offsetTop}px)`;
+}
+function setOpen(on, quiet) {
+  if (on === open) return;
+  open = on;
+  clearInterval(lyricTimer);
+  pill.classList.toggle("open", on);
+  pill.classList.toggle("tinted", on);
+  pill.setAttribute("aria-expanded", on);
+  pill.setAttribute("aria-label", on ? "The island, open on the music page. Click to close it." : "The island. Click to open it.");
+  if (quiet) return;
+  if (on) {
+    clearInterval(timer);
+    current = "music";
+    buttons.forEach((b) => b.setAttribute("aria-pressed", b.dataset.state === "music"));
+    caption.textContent = "Open: big lyrics, tinted by the album cover. Click again to close.";
+    pill.style.width = fit(440);
+    let i = 1;
+    swap(OPEN, () => { setLyric(i); if (!still) lyricTimer = setInterval(() => setLyric(i = (i + 1) % LYRICS.length), 2400); });
+  } else show("music");
 }
 function tour() {
   clearInterval(timer);
@@ -428,10 +510,11 @@ function tour() {
     show(keys[(keys.indexOf(current) + 1) % keys.length]);
   }, 4200);
 }
+pill.addEventListener("click", () => setOpen(!open));
 buttons.forEach((b) => b.addEventListener("click", () => { show(b.dataset.state); clearInterval(timer); }));
 inner.innerHTML = STATES.music.html;
-pill.style.width = Math.min(STATES.music.w, pill.parentElement.clientWidth - 24) + "px";
-tour();
+pill.style.width = fit(STATES.music.w);
+if (location.hash === "#island") setOpen(true); else tour();
 
 // The mayor's moods, drawn exactly as in the app.
 const parts = Object.fromEntries(["leaf", "body", "eyes", "closed", "happy", "zz"].map((id) => [id, document.getElementById(id)]));

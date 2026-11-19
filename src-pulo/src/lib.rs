@@ -90,8 +90,12 @@ fn apply_region(w: &WebviewWindow, s: f64) {
                 let _ = DeleteObject(b.into());
             }
         }
-        SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
+        // No redraw here: a redraw before the transparency is back shows one white frame on
+        // every state change. The webview fills the window anyway, so put the transparency
+        // back first and let the next frame show both. The window takes ownership of rgn.
+        SetWindowRgn(hwnd(w), Some(rgn), false);
     }
+    keep_transparent(w);
 }
 
 /// Transparency comes from DWM blur-behind with an empty region (how tao sets it up). tao

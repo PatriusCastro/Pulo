@@ -60,6 +60,15 @@ fn level(sum_sq: f32, n: usize) -> f32 {
     ((db + 60.0) / 60.0).clamp(0.0, 1.0)
 }
 
+/// Bar height from a band level, measured against that band's recent average (`avg`, updated
+/// here). Mastered music sits near the top of the fixed dB scale all the time, so absolute
+/// levels barely move; the swing around the average is what reads as the beat. Scaled by the
+/// level itself so silence still drops the bar.
+fn bounce(t: f32, avg: &mut f32) -> f32 {
+    *avg = *avg * 0.94 + t * 0.06;
+    ((0.45 + (t - *avg) * 6.0) * (t * 2.0).min(1.0)).clamp(0.0, 1.0)
+}
+
 /// Blocks forever; run on its own thread.
 pub fn run() {
     unsafe {
@@ -90,6 +99,7 @@ fn capture() -> Result<()> {
         let cap: IAudioCaptureClient = client.GetService()?;
         let mut filters: Vec<Biquad> = BANDS.iter().map(|&f| Biquad::bandpass(f.min(fs * 0.45), fs, 1.4)).collect();
         let mut shown = [0f32; 5];
+        let mut avg = [0f32; 5];
         client.Start()?;
         while ON.load(Relaxed) {
             thread::sleep(Duration::from_millis(INTERVAL_MS.load(Relaxed)));
@@ -110,10 +120,10 @@ fn capture() -> Result<()> {
                 }
                 cap.ReleaseBuffer(frames)?;
             }
-            for (s, e) in shown.iter_mut().zip(energy) {
-                let target = level(e, n);
+            for ((s, a), e) in shown.iter_mut().zip(avg.iter_mut()).zip(energy) {
+                let target = bounce(level(e, n), a);
                 // Jump up instantly, fall back gently.
-                *s = if target > *s { target } else { *s * 0.8 + target * 0.2 };
+                *s = if target > *s { target } else { *s * 0.7 + target * 0.3 };
             }
             if let Some(app) = APP.get() {
                 let _ = app.emit("eq", shown);
@@ -145,5 +155,19 @@ mod tests {
         assert!(tone(60.0, 4000.0) < 0.45, "4 kHz band should reject 60 Hz");
         assert!(tone(12000.0, 250.0) < 0.45, "250 Hz band should reject 12 kHz");
         assert_eq!(level(0.0, 0), 0.0);
+    }
+
+    /// A loud, steady band settles mid-height, a beat above it jumps, and silence stays flat.
+    #[test]
+    fn bounce_follows_changes_not_loudness() {
+        let mut a = 0.0;
+        for _ in 0..200 {
+            bounce(0.85, &mut a);
+        }
+        let steady = bounce(0.85, &mut a);
+        assert!((0.35..0.55).contains(&steady), "steady {steady}");
+        assert!(bounce(0.95, &mut a) > steady + 0.3, "a beat should jump");
+        let mut q = 0.0;
+        assert_eq!(bounce(0.0, &mut q), 0.0);
     }
 }

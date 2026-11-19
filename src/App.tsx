@@ -1153,7 +1153,7 @@ export default function App() {
                 ) : playing && mode === "rest" && has("equalizer") ? (
                   // Live waveform while the pill is at rest (unmounting it stops the capture).
                   // Orange while an agent works, so that signal isn't lost under the music.
-                  <Equalizer className={`wave${working.length ? " working" : ""}`} fps={12} />
+                  <Equalizer className={`wave${working.length ? " working" : ""}`} fps={20} />
                 ) : working.length ? (
                   <span className="dot working" aria-label="Agent working" />
                 ) : playing ? (

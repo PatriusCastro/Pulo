@@ -365,7 +365,7 @@ button:focus-visible {
   transform-origin: bottom;
 }
 /* Collapsed: a small voice-memo style waveform, bars grow from the middle. Moved by JS at
-   ~12 fps (Equalizer fps), never by a CSS animation. */
+   ~20 fps (Equalizer fps), never by a CSS animation. */
 .wave {
   display: flex;
   align-items: center;

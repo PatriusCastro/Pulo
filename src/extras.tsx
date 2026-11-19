@@ -1,4 +1,4 @@
-// Phase 3 extras: equalizer bars, the synced lyric line, and the pet.
+// Island extras: equalizer bars, lyrics, the position bar, and the pet.
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -46,14 +46,82 @@ export function useLyricIndex(lines: Line[], positionMs: number, positionAt: num
   return i;
 }
 
-/** Previous, current and next line; the current one highlighted. */
-export function LyricLines({ lines, i }: { lines: Line[]; i: number }) {
-  const at = (k: number) => (k >= 0 && k < lines.length ? lines[k].text || "♪" : "");
+/** Height of one lyric row in px. Must match .lyric in island.css. */
+const LYRIC_ROW = 18;
+
+/** All lines in a window `rows` tall that scrolls with the song: the current line sits on
+ *  the second row, highlighted. One short transition per line change, nothing looping. */
+export function LyricsPanel({ lines, i, rows }: { lines: Line[]; i: number; rows: number }) {
+  const top = Math.max(0, i - 1) * LYRIC_ROW;
   return (
-    <div className="lyrics" key={i} aria-live="off">
-      <div className="lyric dim">{at(i - 1)}</div>
-      <div className="lyric now">{i >= 0 ? at(i) : "♪"}</div>
-      <div className="lyric dim">{at(i + 1)}</div>
+    <div className="lyrics-panel" style={{ height: rows * LYRIC_ROW }} aria-label="Lyrics">
+      <div className="lyrics-scroll" style={{ transform: `translateY(${-top}px)` }}>
+        {lines.map((l, k) => (
+          <div key={k} className={`lyric${k === i ? " now" : ""}`} aria-current={k === i || undefined}>
+            {l.text || "♪"}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const fmtTime = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** Position bar with times. Ticks on its own once a second while playing, so the rest of
+ *  the island doesn't re-render. Dragging seeks when released. */
+export function Progress({
+  duration,
+  position,
+  at,
+  playing,
+  canSeek,
+  onSeek,
+}: {
+  duration: number;
+  position: number;
+  at: number;
+  playing: boolean;
+  canSeek: boolean;
+  onSeek: (ms: number) => void;
+}) {
+  const [, tick] = useState(0);
+  const [drag, setDrag] = useState<number | null>(null);
+  useEffect(() => {
+    if (!playing) return;
+    const id = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [playing]);
+  if (duration <= 0) return null;
+  const live = Math.min(duration, position + (playing && at ? Date.now() - at : 0));
+  const pos = drag ?? live;
+  const commit = () => {
+    if (drag !== null) onSeek(drag);
+    setDrag(null);
+  };
+  return (
+    <div className="progress-row">
+      <span className="time mono">{fmtTime(pos)}</span>
+      <input
+        type="range"
+        className="slider"
+        min={0}
+        max={duration}
+        step={1000}
+        value={pos}
+        disabled={!canSeek}
+        aria-label="Position"
+        aria-valuetext={`${fmtTime(pos)} of ${fmtTime(duration)}`}
+        style={{ "--pct": `${(pos / duration) * 100}%` } as React.CSSProperties}
+        onChange={(e) => setDrag(+e.target.value)}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={() => setDrag(null)}
+      />
+      <span className="time mono">{fmtTime(duration)}</span>
     </div>
   );
 }

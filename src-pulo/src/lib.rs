@@ -196,8 +196,8 @@ fn media_art() -> Response {
 }
 
 #[tauri::command]
-async fn media(action: String) {
-    sys::media_control(&action);
+async fn media(action: String, value: Option<i64>) {
+    sys::media_control(&action, value.unwrap_or(0));
 }
 
 // Sync on purpose: runs on the UI thread, which OLE drag and drop requires.
@@ -439,6 +439,8 @@ pub fn run() {
             tools::tools_state,
             tools::tool,
             tools::stats,
+            tools::volume,
+            tools::set_volume,
             tools::hotkey_ok,
             autostart_enabled,
             set_autostart

@@ -25,9 +25,13 @@ pub struct Media {
     artist: String,
     playing: bool,
     art_rev: u32, // bumps when album art changes; UI then fetches it via `media_art`
+    album: String,
     duration_ms: i64,
     position_ms: i64, // playback position as of `position_at`; the UI extrapolates while playing
     position_at: i64, // ms since epoch
+    can_seek: bool,
+    shuffle: Option<bool>,      // None: the player doesn't offer shuffle
+    repeat: Option<&'static str>, // "none" | "track" | "list"; None: not offered
 }
 
 /// WinRT DateTime (100 ns ticks since 1601) -> ms since 1970.
@@ -143,18 +147,36 @@ fn read_art(p: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Res
 pub fn poll_media() -> bool {
     let cur = session().and_then(|s| {
         let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
-        let status = s.GetPlaybackInfo().ok()?.PlaybackStatus().ok()?;
-        let playing = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        let info = s.GetPlaybackInfo().ok()?;
+        let playing = info.PlaybackStatus().ok()? == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
         let tl = s.GetTimelineProperties().ok();
         let ticks = |r: Result<windows::Foundation::TimeSpan>| r.map_or(0, |t| t.Duration / 10_000);
         let timing = tl.map_or((0, 0, 0), |t| {
             let start = ticks(t.StartTime());
             (ticks(t.EndTime()) - start, ticks(t.Position()) - start, t.LastUpdatedTime().map_or(0, epoch_ms))
         });
-        Some((p.Title().ok()?.to_string(), p.Artist().unwrap_or_default().to_string(), playing, p, timing))
+        // What the player lets us change. Browsers usually offer seeking but not shuffle/repeat.
+        let controls = info.Controls().ok();
+        let offers = |f: fn(&GlobalSystemMediaTransportControlsSessionPlaybackControls) -> Result<bool>| {
+            controls.as_ref().is_some_and(|c| f(c).unwrap_or(false))
+        };
+        let can_seek = offers(|c| c.IsPlaybackPositionEnabled());
+        let shuffle = if offers(|c| c.IsShuffleEnabled()) {
+            Some(info.IsShuffleActive().and_then(|v| v.Value()).unwrap_or(false))
+        } else {
+            None
+        };
+        let repeat = offers(|c| c.IsRepeatEnabled()).then(|| match info.AutoRepeatMode().and_then(|v| v.Value()) {
+            Ok(windows::Media::MediaPlaybackAutoRepeatMode::Track) => "track",
+            Ok(windows::Media::MediaPlaybackAutoRepeatMode::List) => "list",
+            _ => "none",
+        });
+        let text = |r: Result<windows::core::HSTRING>| r.map(|h| h.to_string()).unwrap_or_default();
+        let (artist, album) = (text(p.Artist()), text(p.AlbumTitle()));
+        Some((p.Title().ok()?.to_string(), artist, album, playing, p, timing, (can_seek, shuffle, repeat)))
     });
     let old = STATE.lock().unwrap().media.clone();
-    let new = cur.map(|(title, artist, playing, p, (duration_ms, position_ms, position_at))| {
+    let new = cur.map(|(title, artist, album, playing, p, (duration_ms, position_ms, position_at), (can_seek, shuffle, repeat))| {
         let same_track = old.as_ref().is_some_and(|o| o.title == title && o.artist == artist);
         let mut art_rev = old.as_ref().map_or(0, |o| o.art_rev);
         // Players often publish the art after the title, and browsers first report their own
@@ -167,7 +189,7 @@ pub fn poll_media() -> bool {
             art_rev += 1;
         }
         drop(art);
-        Media { title, artist, playing, art_rev, duration_ms, position_ms, position_at }
+        Media { title, artist, album, playing, art_rev, duration_ms, position_ms, position_at, can_seek, shuffle, repeat }
     });
     let new_track = match (&old, &new) {
         (Some(o), Some(n)) => o.title != n.title || o.artist != n.artist,
@@ -181,12 +203,32 @@ pub fn poll_media() -> bool {
     new_track
 }
 
-pub fn media_control(action: &str) {
+/// `value`: the position in ms for "seek"; unused otherwise.
+pub fn media_control(action: &str, value: i64) {
+    use windows::Media::MediaPlaybackAutoRepeatMode as Repeat;
     let Some(s) = session() else { return };
     let op = match action {
         "toggle" => s.TryTogglePlayPauseAsync(),
         "next" => s.TrySkipNextAsync(),
         "prev" => s.TrySkipPreviousAsync(),
+        "shuffle" => s.GetPlaybackInfo().and_then(|i| {
+            let on = i.IsShuffleActive().and_then(|v| v.Value()).unwrap_or(false);
+            s.TryChangeShuffleActiveAsync(!on)
+        }),
+        // Off -> all -> one -> off, like most players' repeat button.
+        "repeat" => s.GetPlaybackInfo().and_then(|i| {
+            let next = match i.AutoRepeatMode().and_then(|v| v.Value()) {
+                Ok(Repeat::List) => Repeat::Track,
+                Ok(Repeat::Track) => Repeat::None,
+                _ => Repeat::List,
+            };
+            s.TryChangeAutoRepeatModeAsync(next)
+        }),
+        // The timeline may not start at 0; positions in the UI are relative to its start.
+        "seek" => s.GetTimelineProperties().and_then(|t| {
+            let start = t.StartTime().map_or(0, |d| d.Duration);
+            s.TryChangePlaybackPositionAsync(start + value.max(0) * 10_000)
+        }),
         _ => return,
     };
     if let Ok(op) = op {

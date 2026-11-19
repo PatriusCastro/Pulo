@@ -106,8 +106,7 @@ button:focus-visible {
     border-radius 0.34s var(--morph);
 }
 /* Hovering: wider, same height. Quicker than opening, it should feel like a nudge. */
-.pill.peek,
-.pill.peek.wide {
+.pill.peek {
   width: 360px;
   transition-duration: 0.26s;
 }
@@ -245,7 +244,7 @@ button:focus-visible {
   flex: none;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: 50%; /* round in the pill; square (.art) when open */
   object-fit: cover;
 }
 .mini-art.empty {
@@ -380,45 +379,115 @@ button:focus-visible {
   background: #ff9f43;
 }
 /* Expanded: previous / current / next line. The block slides in on each line change. */
-.lyrics {
+/* Music page: player, position bar, extra controls, lyrics below. */
+.music {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+.music .media {
+  gap: 8px;
+}
+.art.small {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+.icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  color: var(--dim);
+}
+.icon-btn.on {
+  color: var(--accent);
+}
+.music-btn {
   margin-top: 6px;
-  animation: lyric-in 0.25s ease;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--dim);
+  background: var(--chip);
+}
+.music-btn:hover {
+  color: var(--fg);
+}
+.progress-row,
+.music-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.time {
+  font-size: 11px;
+  color: var(--dim);
+  min-width: 30px;
+}
+.progress-row .time:last-child {
+  text-align: right;
+}
+.slider {
+  flex: 1;
+  height: 4px;
+  margin: 0;
+  appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--fg) var(--pct), rgba(255, 255, 255, 0.18) var(--pct));
+}
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg);
+}
+.slider:disabled::-webkit-slider-thumb {
+  visibility: hidden;
+}
+.slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.slider.volume {
+  max-width: 140px;
+}
+.music-row .icon-btn:last-child {
+  margin-left: auto;
+}
+.lyrics-panel {
+  overflow: hidden;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 4px;
+}
+.lyrics-scroll {
+  transition: transform 0.3s ease;
 }
 .lyric {
-  font-size: 12px;
-  line-height: 16px;
-  min-height: 16px;
+  font-size: 13px;
+  line-height: 18px; /* = LYRIC_ROW in extras.tsx */
+  height: 18px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: rgba(245, 245, 245, 0.4);
+  transition: color 0.3s ease;
 }
 .lyric.now {
-  color: var(--accent);
+  color: var(--fg);
   font-weight: 600;
 }
-.lyric.dim {
-  color: rgba(245, 245, 245, 0.35);
+.lyrics-none {
+  font-size: 12px;
+  color: var(--dim);
+  text-align: center;
+  padding-top: 8px;
 }
-/* Collapsed: the pill widens to fit the current line. */
-.pill.wide {
-  width: 340px;
-}
-.pill.open.wide {
-  width: 420px;
-}
-.wide .mini-layer {
-  width: 340px;
-}
-.lyric-mini {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg);
-  animation: lyric-in 0.25s ease;
-}
-@keyframes lyric-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
+@media (prefers-reduced-motion: reduce) {
+  .lyrics-scroll,
+  .lyric {
+    transition: none;
   }
 }
 .pet {

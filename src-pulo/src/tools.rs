@@ -97,6 +97,34 @@ pub fn hold_awake(on: bool) {
     }
 }
 
+// ---------- speaker volume (music page slider) ----------
+
+fn speakers() -> Result<IAudioEndpointVolume> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        en.GetDefaultAudioEndpoint(eRender, eConsole)?.Activate(CLSCTX_ALL, None)
+    }
+}
+
+/// Master volume of the default speakers, 0..1 (0 when muted).
+#[tauri::command]
+pub async fn volume() -> f32 {
+    speakers()
+        .and_then(|v| unsafe { Ok(if v.GetMute()?.as_bool() { 0.0 } else { v.GetMasterVolumeLevelScalar()? }) })
+        .unwrap_or(0.0)
+}
+
+#[tauri::command]
+pub async fn set_volume(level: f32) {
+    if let Ok(v) = speakers() {
+        unsafe {
+            let _ = v.SetMasterVolumeLevelScalar(level.clamp(0.0, 1.0), std::ptr::null());
+            let _ = v.SetMute(level <= 0.0, std::ptr::null()); // dragging up from 0 unmutes
+        }
+    }
+}
+
 // ---------- system stats (asked for every 2 s while the Tools tab is showing) ----------
 
 #[derive(Serialize)]

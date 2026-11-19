@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { occurrences, parseIcs, type Raw } from "./ics";
 import { parseLrc, type Line } from "./lyrics";
-import { Equalizer, LyricLines, Pet, useLyricIndex, type Mood } from "./extras";
+import { Equalizer, LyricsPanel, Pet, Progress, useLyricIndex, type Mood } from "./extras";
 import * as P from "./pomodoro";
 import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, type Settings } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
@@ -15,9 +15,13 @@ type Media = {
   artist: string;
   playing: boolean;
   art_rev: number;
+  album: string;
   duration_ms: number;
   position_ms: number;
   position_at: number;
+  can_seek: boolean;
+  shuffle: boolean | null; // null: the player doesn't offer it
+  repeat: "none" | "track" | "list" | null;
 };
 type Snapshot = { media: Media | null; battery: { percent: number; charging: boolean } | null };
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
@@ -39,24 +43,30 @@ type Hud = {
 type Mode = "rest" | "peek" | "open";
 type Tab = "now" | "recent" | "focus" | "agents" | "tools";
 
-// Must match .pill, .pill.wide, .pill.peek and .pill.open in island.css (MAX in lib.rs is
-// the open pill plus the shortcut columns).
+// Must match .pill, .pill.peek and .pill.open in island.css (MAX in lib.rs is the open
+// pill plus the shortcut columns).
 const COLLAPSED = { w: 200, h: 36 };
-const COLLAPSED_LYRICS = { w: 340, h: 36 };
 const PEEK = { w: 360, h: 36 };
 const EXPANDED = { w: 420, h: 268 };
-const sizeOf = (m: Mode, wide: boolean) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : wide ? COLLAPSED_LYRICS : COLLAPSED);
+const sizeOf = (m: Mode) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : COLLAPSED);
 /** Hover this long before peeking, so passing over the top edge on the way to a tab doesn't. */
 const PEEK_DELAY = 120;
 const PRESETS = [1, 5, 15, 25];
 const TAB_LABEL: Record<Tab, string> = { now: "Now", recent: "Recent", focus: "Focus", agents: "Agents", tools: "Tools" };
 const RECENT_MAX = 20;
+const NO_LINES: Line[] = [];
 
 const ICONS = {
   prev: "M6 6h2v12H6zm3.5 6 8.5 6V6z",
   next: "M16 6h2v12h-2zm-10 12 8.5-6L6 6z",
   play: "M8 5v14l11-7z",
   pause: "M6 5h4v14H6zm8 0h4v14h-4z",
+  music: "M12 3v10.6A4 4 0 1 0 14 17V7h4V3z",
+  back: "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z",
+  shuffle: "M10.6 9.2 5.4 4 4 5.4l5.2 5.2zM14.5 4l2 2L4 18.6 5.4 20 18 7.5l2 2V4zm.3 9.4-1.4 1.4 3.1 3.1-2 2H20v-5.5l-2 2z",
+  repeat: "M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z",
+  repeatOne: "M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2zm-4-2V9h-1l-2 1v1h1.5v4z",
+  lyrics: "M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h7v2H4zm14-4v4.3a2 2 0 1 0 2 1.7V15h2v-2z",
   reset: "M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z",
   volume: "M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4",
   mute: "M3 9v6h4l5 5V4L7 9zm16.6 3 2.1-2.1-1.4-1.4-2.1 2.1-2.1-2.1-1.4 1.4 2.1 2.1-2.1 2.1 1.4 1.4 2.1-2.1 2.1 2.1 1.4-1.4z",
@@ -227,6 +237,10 @@ export default function App() {
   const optimisticTimer = useRef<number | undefined>(undefined);
   const dragStart = useRef<{ x: number; y: number; path: string } | null>(null);
   const [lyrics, setLyrics] = useState<Line[]>([]);
+  // Music page (the music button in Now): full player with seek, shuffle, repeat, volume, lyrics.
+  const [musicPage, setMusicPage] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(() => load("showLyrics", true));
+  const [volume, setVolume] = useState(0);
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
   const [cheerUntil, setCheerUntil] = useState(0);
@@ -273,7 +287,6 @@ export default function App() {
   // What the window region currently allows; it must cover the pill before the pill grows
   // into it, and shrinks only once the pill has finished shrinking.
   const region = useRef({ ...COLLAPSED, open: false });
-  const wideRef = useRef(false);
   const intent = useRef<Mode>("rest");
   const setRegion = (s: { w: number; h: number }, open: boolean) => {
     region.current = { ...s, open };
@@ -283,7 +296,7 @@ export default function App() {
   function go(next: Mode) {
     intent.current = next;
     clearTimeout(hoverTimer.current);
-    const t = sizeOf(next, wideRef.current);
+    const t = sizeOf(next);
     const r = region.current;
     if (t.w > r.w || t.h > r.h || (next === "open" && !r.open)) {
       // Only if nothing else was asked for while the region grew (the mouse may have left).
@@ -308,7 +321,7 @@ export default function App() {
   // Shrinking: the region follows once the pill's size transition ends.
   const onTransitionEnd = (e: React.TransitionEvent) => {
     if (e.target !== e.currentTarget || (e.propertyName !== "width" && e.propertyName !== "height")) return;
-    const t = sizeOf(mode, wide);
+    const t = sizeOf(mode);
     const r = region.current;
     if (t.w !== r.w || t.h !== r.h || r.open !== (mode === "open")) setRegion(t, mode === "open");
   };
@@ -548,11 +561,10 @@ export default function App() {
   const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const clock = hm(now);
   const playing = optimistic ?? !!media?.playing;
-  // Synced lyrics: the collapsed pill widens and shows the current line while a song plays.
-  const li = useLyricIndex(lyrics, media?.position_ms ?? 0, media?.position_at ?? 0, playing);
-  const lyricText = playing && lyrics.length ? (li >= 0 && lyrics[li].text) || "♪" : null;
-  const wide = !!lyricText;
-  wideRef.current = wide;
+  const isOpen = mode === "open";
+  // Synced lyrics show on the music page only; follow the song only while they're on screen.
+  const lyricsShown = isOpen && musicPage && showLyrics && lyrics.length > 0;
+  const li = useLyricIndex(lyricsShown ? lyrics : NO_LINES, media?.position_ms ?? 0, media?.position_at ?? 0, playing);
   const agentsOn = has("agents");
   const working = agentsOn ? agents.sessions.filter((a) => a.working && now - a.last < STALE_MS) : [];
   const toolsOn = has("tools");
@@ -575,13 +587,10 @@ export default function App() {
     t <= now ? "Now" : (new Date(t).getDate() === date.getDate() ? "" : "Tomorrow ") + hm(t);
   const nextLabel = next ? `${when(next.start)} · ${next.title}` : null;
 
-  // Growing into the lyrics width: widen the region first so nothing is clipped.
+  // Speaker volume for the music page slider: read when the page opens.
   useEffect(() => {
-    const t = sizeOf(mode, wide);
-    const r = region.current;
-    if (t.w > r.w || t.h > r.h) setRegion(t, mode === "open");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- setRegion reads refs
-  }, [mode, wide]);
+    if (isOpen && musicPage) invoke<number>("volume").then(setVolume);
+  }, [isOpen, musicPage]);
   // Shortcuts changed in Settings while open: the region needs the new button count.
   useEffect(() => {
     if (mode === "open") setRegion(EXPANDED, true);
@@ -633,7 +642,6 @@ export default function App() {
 
   // ---------- pieces ----------
 
-  const isOpen = mode === "open";
   const hudEl = hud && (
     <div className="hud">
       {hud.kind === "power" ? (
@@ -702,7 +710,87 @@ export default function App() {
     </div>
   );
 
-  const nowTab = (
+  const transport = (
+    <div className="controls">
+      <button aria-label="Previous" onClick={() => invoke("media", { action: "prev" })}>
+        <Icon d={ICONS.prev} size={20} />
+      </button>
+      <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
+        <Icon d={playing ? ICONS.pause : ICONS.play} size={26} />
+      </button>
+      <button aria-label="Next" onClick={() => invoke("media", { action: "next" })}>
+        <Icon d={ICONS.next} size={20} />
+      </button>
+    </div>
+  );
+  const toggleLyrics = () => {
+    setShowLyrics(!showLyrics);
+    save("showLyrics", !showLyrics);
+  };
+  const musicEl = media && (
+    <div className="music">
+      <div className="media">
+        <button className="icon-btn" aria-label="Back" onClick={() => setMusicPage(false)}>
+          <Icon d={ICONS.back} size={16} />
+        </button>
+        {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty" />}
+        <div className="meta">
+          <div className="title">{media.title || "Unknown title"}</div>
+          <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
+        </div>
+        {transport}
+      </div>
+      <Progress
+        duration={media.duration_ms}
+        position={media.position_ms}
+        at={media.position_at}
+        playing={playing}
+        canSeek={media.can_seek}
+        onSeek={(ms) => invoke("media", { action: "seek", value: Math.round(ms) })}
+      />
+      <div className="music-row">
+        {media.shuffle !== null && (
+          <button className={`icon-btn${media.shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={media.shuffle} onClick={() => invoke("media", { action: "shuffle" })}>
+            <Icon d={ICONS.shuffle} size={16} />
+          </button>
+        )}
+        {media.repeat !== null && (
+          <button
+            className={`icon-btn${media.repeat !== "none" ? " on" : ""}`}
+            aria-label={`Repeat: ${media.repeat === "track" ? "this song" : media.repeat === "list" ? "all" : "off"}`}
+            onClick={() => invoke("media", { action: "repeat" })}
+          >
+            <Icon d={media.repeat === "track" ? ICONS.repeatOne : ICONS.repeat} size={16} />
+          </button>
+        )}
+        <Icon d={volume > 0 ? ICONS.volume : ICONS.mute} size={16} />
+        <input
+          type="range"
+          className="slider volume"
+          min={0}
+          max={1}
+          step={0.02}
+          value={volume}
+          aria-label="Volume"
+          style={{ "--pct": `${volume * 100}%` } as React.CSSProperties}
+          onChange={(e) => {
+            setVolume(+e.target.value);
+            invoke("set_volume", { level: +e.target.value });
+          }}
+        />
+        {lyricsOn && (
+          <button className={`icon-btn${showLyrics ? " on" : ""}`} aria-label="Lyrics" aria-pressed={showLyrics} onClick={toggleLyrics}>
+            <Icon d={ICONS.lyrics} size={16} />
+          </button>
+        )}
+      </div>
+      {lyricsOn && showLyrics && (
+        lyrics.length ? <LyricsPanel lines={lyrics} i={li} rows={5} /> : <div className="lyrics-none">No synced lyrics for this song</div>
+      )}
+    </div>
+  );
+
+  const nowTab = musicPage && musicEl ? musicEl : (
     <>
       {media ? (
         <div className="media">
@@ -713,19 +801,11 @@ export default function App() {
               <div className="sub">{media.artist}</div>
               {isOpen && playing && has("equalizer") && <Equalizer />}
             </div>
-            {isOpen && lyrics.length > 0 && <LyricLines lines={lyrics} i={li} />}
-          </div>
-          <div className="controls">
-            <button aria-label="Previous" onClick={() => invoke("media", { action: "prev" })}>
-              <Icon d={ICONS.prev} size={20} />
-            </button>
-            <button aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
-              <Icon d={playing ? ICONS.pause : ICONS.play} size={26} />
-            </button>
-            <button aria-label="Next" onClick={() => invoke("media", { action: "next" })}>
-              <Icon d={ICONS.next} size={20} />
+            <button className="music-btn" onClick={() => setMusicPage(true)}>
+              <Icon d={ICONS.music} size={12} /> Music
             </button>
           </div>
+          {transport}
         </div>
       ) : (
         <div className="idle">
@@ -987,7 +1067,7 @@ export default function App() {
     >
       {side(prefs.left)}
       <div
-        className={`pill ${mode}${wide ? " wide" : ""}`}
+        className={`pill ${mode}`}
         onTransitionEnd={onTransitionEnd}
         onClick={() => {
           if (intent.current !== "open") {
@@ -1002,17 +1082,12 @@ export default function App() {
               <span className="slot">
                 {playing && art ? <img className="mini-art" src={art} alt="" /> : has("pet") && <Pet mood={mood} key={mood} />}
               </span>
-              {(() => {
-                const lyric = !status && !songFlash && lyricText;
-                return (
-                  <span
-                    className={`center${lyric ? " lyric-mini" : " mono"}${status ? ` ${statusCls}` : ""}${!status && songFlash ? " flash" : ""}`}
-                    key={status ? "status" : (songFlash ?? (lyric ? `l${li}` : "clock"))}
-                  >
-                    {status ?? songFlash ?? lyricText ?? clock}
-                  </span>
-                );
-              })()}
+              <span
+                className={`center mono${status ? ` ${statusCls}` : ""}${!status && songFlash ? " flash" : ""}`}
+                key={status ? "status" : (songFlash ?? "clock")}
+              >
+                {status ?? songFlash ?? clock}
+              </span>
               <span className="slot">
                 {micMuted ? (
                   <span className="mic-off" aria-label="Microphone muted">

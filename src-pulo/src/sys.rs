@@ -45,13 +45,22 @@ pub struct Battery {
     charging: bool,
 }
 
+/// A second player that is also playing, offered in the island as "Also playing".
+#[derive(Serialize, Clone, PartialEq)]
+pub struct Other {
+    app: String,
+    title: String,
+    artist: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct Snapshot {
     media: Option<Media>,
+    other: Option<Other>,
     battery: Option<Battery>,
 }
 
-pub static STATE: Mutex<Snapshot> = Mutex::new(Snapshot { media: None, battery: None });
+pub static STATE: Mutex<Snapshot> = Mutex::new(Snapshot { media: None, other: None, battery: None });
 pub static ART: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 pub static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -76,8 +85,66 @@ fn manager() -> Option<&'static GlobalSystemMediaTransportControlsSessionManager
     MGR.get_or_init(|| GlobalSystemMediaTransportControlsSessionManager::RequestAsync().ok()?.get().ok()).as_ref()
 }
 
-fn session() -> Option<GlobalSystemMediaTransportControlsSession> {
-    manager()?.GetCurrentSession().ok()
+type Session = GlobalSystemMediaTransportControlsSession;
+
+/// The player picked with "Also playing", by app id. Cleared when Windows moves to
+/// another current player, so a pick doesn't outlive what the user was listening to.
+// ponytail: players are told apart by app id, so two playing tabs of one browser count
+// as one. Key on app id + title if that matters.
+static PICK: Mutex<Option<String>> = Mutex::new(None);
+
+fn app_id(s: &Session) -> String {
+    s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default()
+}
+
+fn is_playing(s: &Session) -> bool {
+    s.GetPlaybackInfo().and_then(|i| i.PlaybackStatus()).is_ok_and(|p| p == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing)
+}
+
+fn sessions() -> Vec<Session> {
+    manager().and_then(|m| m.GetSessions().ok()).map(|v| v.into_iter().collect()).unwrap_or_default()
+}
+
+/// "Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "MSEdge" -> a short label.
+fn app_name(id: &str) -> String {
+    let n = id.rsplit(['!', '\\']).next().unwrap_or(id);
+    let n = n.strip_suffix(".exe").unwrap_or(n);
+    match n.to_ascii_lowercase().as_str() {
+        "msedge" => "Edge".into(),
+        _ => n.to_string(),
+    }
+}
+
+/// The player the island shows and controls: the one picked in the island, else
+/// Windows' current player, unless that one is paused while another is playing.
+fn session() -> Option<Session> {
+    let all = sessions();
+    let mut pick = PICK.lock().unwrap();
+    if let Some(id) = pick.clone() {
+        match all.iter().find(|s| app_id(s) == id) {
+            Some(s) => return Some(s.clone()),
+            None => *pick = None, // the picked player closed
+        }
+    }
+    drop(pick);
+    match manager()?.GetCurrentSession().ok() {
+        Some(c) if is_playing(&c) => Some(c),
+        c => all.into_iter().find(is_playing).or(c),
+    }
+}
+
+/// Another player that is playing besides `shown`, if any: its app id, and what the island shows.
+fn other(shown: Option<&Session>) -> Option<(String, Other)> {
+    let shown = shown.map(app_id);
+    let s = sessions().into_iter().find(|s| Some(app_id(s)) != shown && is_playing(s))?;
+    let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let id = app_id(&s);
+    let o = Other {
+        app: app_name(&id),
+        title: p.Title().ok()?.to_string(),
+        artist: p.Artist().map(|h| h.to_string()).unwrap_or_default(),
+    };
+    Some((id, o))
 }
 
 static MEDIA_WAKE: OnceLock<Mutex<std::sync::mpsc::Sender<()>>> = OnceLock::new();
@@ -100,22 +167,28 @@ pub fn watch_media() {
     let (tx, rx) = std::sync::mpsc::channel();
     let _ = MEDIA_WAKE.set(Mutex::new(tx));
     if let Some(m) = manager() {
-        let _ = m.CurrentSessionChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
+        let _ = m.CurrentSessionChanged(&TypedEventHandler::new(|_, _| {
+            *PICK.lock().unwrap() = None;
+            Ok(wake_media())
+        }));
         let _ = m.SessionsChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
     }
     use std::time::{Duration, Instant};
-    let mut hooked = String::new(); // player whose session events we listen to
+    // Every player's events, not just the shown one's: a second player starting or
+    // pausing changes which one is shown and the "Also playing" line.
+    let mut hooked = std::collections::HashSet::new(); // players whose events we listen to
     let mut fast_until = Instant::now();
     loop {
-        if let Some(s) = session() {
-            let id = s.SourceAppUserModelId().map(|h| h.to_string()).unwrap_or_default();
-            if id != hooked {
-                // ponytail: handlers on the previous player aren't removed; they only cause
-                // an extra re-read. Keep tokens and unregister if players switch a lot.
+        let all = sessions();
+        let ids: Vec<String> = all.iter().map(app_id).collect();
+        hooked.retain(|id| ids.contains(id)); // a player that closed gets hooked again if it returns
+        for (s, id) in all.iter().zip(ids) {
+            if hooked.insert(id) {
+                // ponytail: handlers on closed players aren't removed; they only cause an
+                // extra re-read. Keep tokens and unregister if players come and go a lot.
                 let _ = s.MediaPropertiesChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
                 let _ = s.PlaybackInfoChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
                 let _ = s.TimelinePropertiesChanged(&TypedEventHandler::new(|_, _| Ok(wake_media())));
-                hooked = id;
             }
         }
         // Browsers swap in the real cover some seconds after a track starts without saying
@@ -145,7 +218,9 @@ fn read_art(p: &GlobalSystemMediaTransportControlsSessionMediaProperties) -> Res
 /// watch_media on player events, and by media_control right after a button press.
 /// Returns true when a different track started.
 pub fn poll_media() -> bool {
-    let cur = session().and_then(|s| {
+    let shown = session();
+    let also = other(shown.as_ref()).map(|(_, o)| o);
+    let cur = shown.and_then(|s| {
         let p = s.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
         let info = s.GetPlaybackInfo().ok()?;
         let playing = info.PlaybackStatus().ok()? == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
@@ -196,16 +271,27 @@ pub fn poll_media() -> bool {
         (None, Some(_)) => true,
         _ => false,
     };
-    if new != old {
-        STATE.lock().unwrap().media = new;
+    let mut st = STATE.lock().unwrap();
+    if new != old || also != st.other {
+        st.media = new;
+        st.other = also;
+        drop(st);
         emit_state();
     }
     new_track
 }
 
 /// `value`: the position in ms for "seek"; unused otherwise.
+/// "swap" shows the "Also playing" player instead of the current one.
 pub fn media_control(action: &str, value: i64) {
     use windows::Media::MediaPlaybackAutoRepeatMode as Repeat;
+    if action == "swap" {
+        if let Some((id, _)) = other(session().as_ref()) {
+            *PICK.lock().unwrap() = Some(id);
+        }
+        poll_media();
+        return;
+    }
     let Some(s) = session() else { return };
     let op = match action {
         "toggle" => s.TryTogglePlayPauseAsync(),

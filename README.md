@@ -1,6 +1,40 @@
+<div align="center">
+
+<img src="docs/icon-256.png" width="96" alt="Pulo icon">
+
 # Pulo
 
-**A Dynamic Island for Windows.** A small pill sits at the top of your screen and shows what's happening: the song that's playing, your next meeting, a finished download, a running focus timer. Hover to peek and click to open.
+**A Dynamic Island for Windows.**
+
+A small pill at the top of your screen that shows what's happening: the song that's playing, your next meeting, a finished download, a running focus timer. Hover to peek, click to open.
+
+[![Release](https://img.shields.io/github/v/release/PatriusCastro/Pulo?include_prereleases&label=release)](https://github.com/PatriusCastro/Pulo/releases)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)](#install)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+[**Download**](https://github.com/PatriusCastro/Pulo/releases) · [**Try it in your browser**](https://patriuscastro.github.io/Pulo/) · [Build from source](#build-from-source)
+
+<img src=".github/readme/demo.gif" width="720" alt="The Pulo island at the top of the screen: hovering shows the song, clicking opens the player, and the music page shows synced lyrics">
+
+</div>
+
+## Small until you need it
+
+It stays out of the way and grows only as far as you ask.
+
+| Rest | Peek (hover) |
+|---|---|
+| <img src=".github/readme/rest.png" alt="Pulo at rest: album art, the time and a live waveform"> | <img src=".github/readme/peek.png" alt="Pulo when hovered: song title, artist and playback controls"> |
+
+| Open (click) | Synced lyrics |
+|---|---|
+| <img src=".github/readme/open.png" alt="The open island: now playing, device batteries and system stats, with shortcut buttons on each side"> | <img src=".github/readme/lyrics.png" alt="The music page with synced lyrics on a background tinted by the album cover"> |
+
+| Focus timer | Quick tools |
+|---|---|
+| <img src=".github/readme/focus.png" alt="The Focus tab: a pomodoro ring with rounds and quick timers"> | <img src=".github/readme/tools.png" alt="The Tools tab: dark mode, mic, keep awake, lock, empty bin and scratchpad"> |
+
+<sub>Captured from the [live demo](https://patriuscastro.github.io/Pulo/), so the songs and lyrics are made up.</sub>
 
 Built with [Tauri 2](https://tauri.app) (Rust) and React. It's light: no looping animations, and background work runs only for the features you turn on.
 

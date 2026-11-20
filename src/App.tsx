@@ -22,7 +22,8 @@ type Media = {
   shuffle: boolean | null; // null: the player doesn't offer it
   repeat: "none" | "track" | "list" | null;
 };
-type Snapshot = { media: Media | null; battery: { percent: number; charging: boolean } | null };
+type Other = { app: string; title: string; artist: string }; // a second player that is also playing
+type Snapshot = { media: Media | null; other?: Other | null; battery: { percent: number; charging: boolean } | null };
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
 type Agents = { sessions: Session[]; tokens_today: number };
 type Tools = { dark: boolean; mic_muted: boolean; awake: boolean };
@@ -84,6 +85,7 @@ const ICONS = {
   mouse: "M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm-1 3h2v4h-2z",
   keyboard: "M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm2 3v2h2V9zm4 0v2h2V9zm4 0v2h2V9zm4 0v2h2V9zM7 13v2h10v-2z",
   headphones: "M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h2a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z",
+  swap: "M16 17.01V10h-2v7.01h-3L15 21l4-3.99zM9 3 5 6.99h3V14h2V6.99h3z",
   bluetooth: "M11 2h1l6 5.5-4.6 4.5 4.6 4.5-6 5.5h-1v-7.6l-4.3 4.2-1.4-1.4 5.7-5.2-5.7-5.2 1.4-1.4 4.3 4.2zm2 2.5v5l2.7-2.5zm0 10v5l2.7-2.5z",
   gear: "M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54a7.4 7.4 0 0 0-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z",
   activity: "M3 11h4.3L10 3.6l4 13.2 2.4-5.8H21v2h-3.3L14 21.4 10 8.2 8.7 13H3z",
@@ -861,6 +863,14 @@ export default function App() {
               <Icon d={ICONS.lyrics} size={16} />
             </button>
           </div>
+          {snap.other && (
+            <button className="also" title={`Show ${snap.other.app} instead`} onClick={() => invoke("media", { action: "swap" })}>
+              <span className="also-text">
+                Also playing · {snap.other.app} — {[snap.other.title, snap.other.artist].filter(Boolean).join(" · ")}
+              </span>
+              <Icon d={ICONS.swap} size={14} />
+            </button>
+          )}
         </div>
       ) : (
         <div className="idle">

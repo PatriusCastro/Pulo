@@ -564,7 +564,7 @@ pub fn poll_notifications() {
 }
 
 /// Press a Windows shortcut: keys go down in order, then up in reverse.
-fn press(keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]) {
+pub(crate) fn press(keys: &[windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY]) {
     use windows::Win32::UI::Input::KeyboardAndMouse::*;
     let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
         r#type: INPUT_KEYBOARD,

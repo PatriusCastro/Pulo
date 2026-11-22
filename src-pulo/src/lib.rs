@@ -1,4 +1,6 @@
 mod agents;
+mod clip;
+mod shots;
 mod devices;
 mod eq;
 mod sys;
@@ -33,9 +35,27 @@ const EDGE: f64 = 2.0;
 // drawn and clickable, is set to the pill's current size. Clicks elsewhere pass through.
 // The open pill (420 wide, .pill.open in island.css) plus a 48 px shortcut column on
 // each side (.side), and EDGE above and below it. Must match EXPANDED in App.tsx.
-const MAX: (f64, f64) = (516.0, 268.0 + 2.0 * EDGE);
+/// Window size. 40 px more than the open pill: hiding until the mouse comes near keeps the
+/// window on the screen's edge and drops the island by the gap (up to 40) inside it.
+const MAX: (f64, f64) = (516.0, 268.0 + 2.0 * EDGE + 40.0);
 /// Shortcut buttons that fit in a side column (also MAX_SHORTCUTS in prefs.ts).
 const MAX_SHORTCUTS: u32 = 5;
+/// The notch style (a setting): flush with the top of the screen, with an inward curve this
+/// wide on each side where it meets the edge (.ears in island.css).
+static NOTCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const EAR: f64 = 8.0;
+/// Over a fullscreen video or browser, or always with auto-hide (a setting), the resting
+/// island tucks up into the top edge, leaving TUCK_SHOW of the pill showing. The mouse
+/// coming within NEAR of it brings it back down.
+static TUCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static AUTO_HIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const TUCK_SHOW: f64 = 4.0;
+const NEAR: f64 = 12.0;
+
+fn tucked() -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    TUCKED.load(Relaxed) || AUTO_HIDE.load(Relaxed)
+}
 
 /// What's drawn and clickable: the pill at its current size, plus the shortcut buttons
 /// beside it (counts are 0 unless the island is open).
@@ -45,8 +65,9 @@ struct Region {
     h: f64,
     left: u32,
     right: u32,
+    out: bool, // tucked, but out of the edge because the mouse came near
 }
-static REGION: Mutex<Region> = Mutex::new(Region { w: 200.0, h: 36.0, left: 0, right: 0 });
+static REGION: Mutex<Region> = Mutex::new(Region { w: 200.0, h: 36.0, left: 0, right: 0, out: false });
 
 /// Long-lived background thread with a name (shows up in profilers and debuggers).
 fn named(name: &str, f: impl FnOnce() + Send + 'static) {
@@ -54,6 +75,13 @@ fn named(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 fn hwnd(w: &WebviewWindow) -> HWND {
+    // Each lookup is a blocking round trip to the main thread, and the background loops ask
+    // many times a second. The island's handle never changes, so look it up once. (Settings
+    // and the scratchpad get a new one each time they open, so theirs aren't kept.)
+    static ISLAND: std::sync::OnceLock<isize> = std::sync::OnceLock::new();
+    if w.label() == "main" {
+        return HWND(*ISLAND.get_or_init(|| w.hwnd().expect("hwnd").0 as isize) as _);
+    }
     HWND(w.hwnd().expect("hwnd").0)
 }
 
@@ -61,12 +89,23 @@ fn px(v: f64, s: f64) -> i32 {
     (v * s).round() as i32
 }
 
+/// The closed pill (COLLAPSED and BUBBLE in App.tsx), not peeking or open.
+fn resting(r: Region) -> bool {
+    r.h <= 36.0 && r.w <= 200.0
+}
+
+/// How far the window reaches above the top of the screen, in px: the notch and a tucked
+/// island sit flush with the edge. (A tucked one slides up at rest in CSS, .tucked.)
+fn lift(s: f64) -> Option<i32> {
+    (tucked() || NOTCH.load(std::sync::atomic::Ordering::Relaxed)).then(|| px(EDGE, s))
+}
+
 /// Clip the window to the pill's shape: rounded like the pill (radius as in island.css),
 /// centered, flush to the top, plus a circle per shortcut button (.side, .shortcut in
 /// island.css). Outside this shape the window doesn't exist, so clicks pass through, and
 /// if Windows ever drops the transparency there are no square corners left to turn white.
 fn apply_region(w: &WebviewWindow, s: f64) {
-    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateEllipticRgn, CreateRoundRectRgn, DeleteObject, RGN_OR};
+    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateEllipticRgn, CreateRoundRectRgn, DeleteObject, OffsetRgn, RGN_OR};
     let r = *REGION.lock().unwrap();
     let pill_w = r.w.min(MAX.0);
     let radius = if r.h <= 36.0 { r.h / 2.0 } else { 30.0 };
@@ -76,10 +115,21 @@ fn apply_region(w: &WebviewWindow, s: f64) {
     // margin around every shape for that edge to fade out in. The pill sits EDGE below the
     // window's top so the margin goes all the way round.
     let m = px(EDGE, s);
+    let lift = lift(s);
+    let tuck = tucked() && resting(r) && !r.out;
+    let notch = NOTCH.load(std::sync::atomic::Ordering::Relaxed);
     unsafe {
         // +1: GDI leaves out the right and bottom edges of round regions.
         let d = px(radius * 2.0, s) + 2 * m;
-        let rgn = CreateRoundRectRgn(x0 - m, 0, x0 + px(pill_w, s) + m + 1, px(r.h, s) + 2 * m + 1, d, d);
+        // The notch's top corners are square: start the rounded shape above the window.
+        let top = if notch { -d } else { 0 };
+        let rgn = CreateRoundRectRgn(x0 - m, top, x0 + px(pill_w, s) + m + 1, px(r.h, s) + 2 * m + 1, d, d);
+        if notch {
+            let e = px(EAR, s);
+            let ears = CreateRectRgn(x0 - m - e, m, x0 + px(pill_w, s) + m + e, m + e);
+            CombineRgn(Some(rgn), Some(rgn), Some(ears), RGN_OR);
+            let _ = DeleteObject(ears.into());
+        }
         // 40 px buttons, 4 px into each 48 px column, rows every 48 px from 6 px below the
         // pill's top.
         for (n, x) in [(r.left, 4.0), (r.right, MAX.0 - 44.0)] {
@@ -89,6 +139,31 @@ fn apply_region(w: &WebviewWindow, s: f64) {
                 CombineRgn(Some(rgn), Some(rgn), Some(b), RGN_OR);
                 let _ = DeleteObject(b.into());
             }
+        }
+        // Lifted to hide (not the notch) and out: the island comes down to the gap, as the pill
+        // does in CSS (--drop), with a strip above it so it's seen sliding down from the edge.
+        if let (Some(l), false, false) = (lift, notch, tuck) {
+            let g = px(TOP_GAP.load(std::sync::atomic::Ordering::Relaxed) as f64, s);
+            let _ = OffsetRgn(rgn, 0, g);
+            let strip = CreateRectRgn(x0 - m, l, x0 + px(pill_w, s) + m + 1, l + g + m);
+            CombineRgn(Some(rgn), Some(rgn), Some(strip), RGN_OR);
+            let _ = DeleteObject(strip.into());
+        }
+        // Tucked: the sliver of pill left showing, and an invisible band round it so the
+        // mouse only has to come near.
+        let n = px(NEAR.max(TUCK_SHOW), s);
+        if let (Some(l), true) = (lift, tuck) {
+            let band = CreateRectRgn(x0 - n, l, x0 + px(pill_w, s) + n, l + n);
+            CombineRgn(Some(rgn), Some(rgn), Some(band), RGN_OR);
+            let _ = DeleteObject(band.into());
+        }
+        // Nothing above the top of the screen: a screen stacked above this one would show it.
+        // Tucked, nothing below the band either.
+        if let Some(l) = lift {
+            let bottom = if tuck { l + n } else { px(MAX.1, s) + 1 };
+            let below = CreateRectRgn(0, l, px(MAX.0, s) + 1, bottom);
+            CombineRgn(Some(rgn), Some(rgn), Some(below), windows::Win32::Graphics::Gdi::RGN_AND);
+            let _ = DeleteObject(below.into());
         }
         keep_transparent(w); // before the redraw, so it never shows a frame without it
         SetWindowRgn(hwnd(w), Some(rgn), true); // the window takes ownership of rgn
@@ -139,7 +214,10 @@ fn target() -> (RECT, f64) {
         let (pw, ph) = (px(MAX.0, s), px(MAX.1, s));
         let x = r.left + (r.right - r.left - pw) / 2;
         let gap = TOP_GAP.load(std::sync::atomic::Ordering::Relaxed) as f64;
-        let y = r.top + px(gap - EDGE, s); // the pill sits EDGE into its window
+        let y = match lift(s) {
+            Some(l) => r.top - l,
+            None => r.top + px(gap - EDGE, s), // the pill sits EDGE into its window
+        };
         (RECT { left: x, top: y, right: x + pw, bottom: y + ph }, s)
     }
 }
@@ -170,12 +248,146 @@ fn place(w: &WebviewWindow) {
     keep_transparent(w);
 }
 
+/// Right-click on the island: the window settings at hand, as a menu at the cursor. Built
+/// fresh each time so the checks show what's saved now.
+#[tauri::command]
+fn quick_menu(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    use tauri::menu::{CheckMenuItem, PredefinedMenuItem, Submenu};
+    let build = || -> tauri::Result<()> {
+        let s = load_settings(&app);
+        let check = |id: &str, label: &str, on: bool| CheckMenuItem::with_id(&app, id, label, true, on, None::<&str>);
+        let style = if s.style.is_empty() { "pill" } else { s.style.as_str() };
+        let pill = check("q-style-pill", "Pill", style == "pill")?;
+        let notch = check("q-style-notch", "Notch", style == "notch")?;
+        let bubble = check("q-style-bubble", "Bubble", style == "bubble")?;
+        let look = Submenu::with_items(&app, "Look", true, &[&pill, &notch, &bubble])?;
+        // Hide: every way of keeping the island out of sight, in one place.
+        let tuck = check("q-auto-hide", "Until the mouse comes near", s.auto_hide)?;
+        let videos = check("q-hide-fullscreen", "Over full-screen videos", s.hide_fullscreen)?;
+        let browsers = check("q-hide-browsers", "Over browsers", s.hide_browsers)?;
+        let maximized = check("q-hide-maximized", "Over maximized windows", s.hide_maximized)?;
+        // The app you were in when you right-clicked (the island never takes focus).
+        let front = front_app()
+            .filter(|(_, _, exe)| exe != "explorer" && !BROWSERS.contains(&exe.as_str()))
+            .map(|(_, path, exe)| HiddenApp { name: tools::describe(&path).unwrap_or_else(|| exe.clone()), exe });
+        *MENU_APP.lock().unwrap() = front.clone();
+        let mut apps = Vec::new();
+        if let Some(a) = &front {
+            let on = s.hide_apps.iter().any(|x| x.exe == a.exe);
+            apps.push(check("q-hide-app", &format!("Over {}", a.name), on)?);
+        }
+        // The others already on the list, ticked; picking one takes it off.
+        for (i, a) in s.hide_apps.iter().enumerate() {
+            if front.as_ref().is_none_or(|f| f.exe != a.exe) {
+                apps.push(check(&format!("q-unhide-{i}"), &format!("Over {}", a.name), true)?);
+            }
+        }
+        let snoozed = now_ms() < SNOOZE_UNTIL.load(std::sync::atomic::Ordering::Relaxed);
+        let snooze = if snoozed {
+            MenuItem::with_id(&app, "q-unsnooze", "Show again", true, None::<&str>)?
+        } else {
+            MenuItem::with_id(&app, "q-snooze", "For an hour (Ctrl+Alt+Space brings it back)", true, None::<&str>)?
+        };
+        let sep1 = PredefinedMenuItem::separator(&app)?;
+        let sep2 = PredefinedMenuItem::separator(&app)?;
+        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&tuck, &sep1, &videos, &browsers, &maximized];
+        items.extend(apps.iter().map(|a| a as &dyn tauri::menu::IsMenuItem<tauri::Wry>));
+        items.extend([&sep2 as &dyn tauri::menu::IsMenuItem<tauri::Wry>, &snooze]);
+        let hide = Submenu::with_items(&app, "Hide", true, &items)?;
+        let through = check("q-click-through", "Click through", s.click_through)?;
+        let settings = MenuItem::with_id(&app, "q-settings", "Settings…", true, None::<&str>)?;
+        let quit = MenuItem::with_id(&app, "q-quit", "Quit Pulo", true, None::<&str>)?;
+        let line = PredefinedMenuItem::separator(&app)?;
+        window.popup_menu(&Menu::with_items(&app, &[&look, &hide, &through, &line, &settings, &quit])?)
+    };
+    build().map_err(|e| e.to_string())
+}
+
+/// A quick menu item was picked (ids from quick_menu; the tray's own ids are ignored here).
+fn quick_menu_clicked(app: &AppHandle, id: &str) {
+    let mut s = load_settings(app);
+    match id {
+        "q-auto-hide" => s.auto_hide = !s.auto_hide,
+        "q-hide-fullscreen" => s.hide_fullscreen = !s.hide_fullscreen,
+        "q-hide-browsers" => s.hide_browsers = !s.hide_browsers,
+        "q-hide-maximized" => s.hide_maximized = !s.hide_maximized,
+        "q-hide-app" => {
+            let Some(a) = MENU_APP.lock().unwrap().clone() else { return };
+            let had = s.hide_apps.len();
+            s.hide_apps.retain(|x| x.exe != a.exe);
+            if s.hide_apps.len() == had {
+                s.hide_apps.push(a);
+            }
+        }
+        "q-snooze" | "q-unsnooze" => {
+            let until = if id == "q-snooze" { now_ms() + 3_600_000 } else { 0 };
+            SNOOZE_UNTIL.store(until, std::sync::atomic::Ordering::Relaxed);
+            if let Some(w) = app.get_webview_window("main") {
+                update_visibility(&w);
+            }
+            return;
+        }
+        "q-click-through" => s.click_through = !s.click_through,
+        "q-settings" => return open_settings(app),
+        "q-quit" => return app.exit(0),
+        _ => {
+            if let Some(st) = id.strip_prefix("q-style-") {
+                s.style = st.into();
+            } else if let Some(i) = id.strip_prefix("q-unhide-").and_then(|i| i.parse::<usize>().ok()) {
+                if i < s.hide_apps.len() {
+                    s.hide_apps.remove(i);
+                }
+            } else {
+                return;
+            }
+        }
+    }
+    let _ = save_settings(app, &s);
+}
+
 /// The pill's size, and how many shortcut buttons show on each side (0 unless open).
 #[tauri::command]
-fn resize(window: WebviewWindow, w: f64, h: f64, left: u32, right: u32) {
-    *REGION.lock().unwrap() = Region { w, h, left, right };
+fn resize(window: WebviewWindow, w: f64, h: f64, left: u32, right: u32, out: bool) {
+    *REGION.lock().unwrap() = Region { w, h, left, right, out };
     apply_region(&window, window.scale_factor().unwrap_or(1.0));
     keep_transparent(&window);
+}
+
+/// The app that had the keyboard before the island took it (to-do typing); 0 if none.
+static TYPED_FROM: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// The island never takes focus, except while you type a to-do: `on` lets it, `off` hands
+/// the keyboard back to the app you were in (unless you've since clicked somewhere else).
+#[tauri::command]
+fn island_keyboard(window: WebviewWindow, on: bool) {
+    use std::sync::atomic::Ordering::Relaxed;
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    // Only the no-activate bit, by hand. Not tao's set_focusable: that rewrites the whole
+    // style later on its own thread (dropping tool-window and the transparency) and redraws
+    // the frame, which is what made the island flash.
+    unsafe {
+        let h = hwnd(&window);
+        let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+        let na = WS_EX_NOACTIVATE.0 as isize;
+        if on {
+            let fg = GetForegroundWindow();
+            if fg != h {
+                TYPED_FROM.store(fg.0 as isize, Relaxed);
+            }
+            SetWindowLongPtrW(h, GWL_EXSTYLE, ex & !na);
+            // Allowed: the click that asked for this was input to this app.
+            let _ = SetForegroundWindow(h);
+            let _ = SetFocus(Some(h)); // wry passes it on to the page
+        } else {
+            SetWindowLongPtrW(h, GWL_EXSTYLE, ex | na);
+            let prev = TYPED_FROM.swap(0, Relaxed);
+            if GetForegroundWindow() == h && prev != 0 {
+                let _ = SetForegroundWindow(HWND(prev as _));
+            }
+        }
+    }
+    // Activating (and leaving) the window drops the transparency, partly after this returns.
+    refresh_island(window.app_handle());
 }
 
 /// Island shortcuts. Fixed list: the webview can't ask Windows to run anything else.
@@ -190,6 +402,7 @@ fn launch(app: AppHandle, target: String) {
         "screenshot" => "ms-screenclip:",
         "explorer" => "explorer.exe",
         "task_manager" => "taskmgr.exe",
+        "clipboard_settings" => "ms-settings:clipboard",
         _ => return,
     };
     sys::open_path(cmd);
@@ -278,6 +491,18 @@ struct Settings {
     show_in_screenshots: bool, // off: hidden from screenshots, recordings and screen sharing
     #[serde(default)]
     top_gap: Option<u32>, // px between the top of the screen and the pill; None = 6
+    #[serde(default)]
+    style: String, // "pill", "notch" or "bubble" (STYLES in prefs.ts); "" = pill
+    #[serde(default)]
+    auto_hide: bool, // tucked into the top edge until the mouse comes near (TUCKED)
+    #[serde(default)]
+    hide_fullscreen: bool, // hidden, not just tucked, over full-screen videos (HIDE_FULLSCREEN)
+    #[serde(default)]
+    hide_browsers: bool, // hidden while a browser is in front (hidden_by_rule)
+    #[serde(default)]
+    hide_maximized: bool, // hidden while the window in front is maximized on its screen
+    #[serde(default)]
+    hide_apps: Vec<HiddenApp>, // hidden while one of these is in front
 }
 
 // ---------- click-through and screenshots ----------
@@ -287,7 +512,15 @@ static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 fn apply_window_settings(app: &AppHandle, s: &Settings) {
     CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
     TOP_GAP.store(s.top_gap.unwrap_or(6).min(40), std::sync::atomic::Ordering::Relaxed); // place() moves it
+    NOTCH.store(s.style == "notch", std::sync::atomic::Ordering::Relaxed);
+    AUTO_HIDE.store(s.auto_hide, std::sync::atomic::Ordering::Relaxed);
+    HIDE_FULLSCREEN.store(s.hide_fullscreen, std::sync::atomic::Ordering::Relaxed);
+    *RULES.lock().unwrap() = (s.hide_browsers, s.hide_maximized, s.hide_apps.iter().map(|a| a.exe.clone()).collect());
     if let Some(w) = app.get_webview_window("main") {
+        update_visibility(&w); // a rule turned on for the app in front applies now
+        // Both change where the island sits and its shape; move it now, not on the next tick.
+        place(&w);
+        apply_region(&w, w.scale_factor().unwrap_or(1.0));
         use windows::Win32::Graphics::Gdi::{RedrawWindow, RDW_ALLCHILDREN, RDW_ERASE, RDW_FRAME, RDW_INVALIDATE};
         let a = if s.show_in_screenshots { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
         let mut cur = Default::default();
@@ -306,8 +539,10 @@ fn apply_window_settings(app: &AppHandle, s: &Settings) {
 
 /// Whether the mouse is over the pill itself (not the transparent rest of the window).
 fn over_pill(w: &WebviewWindow, r: Region) -> bool {
-    let s = w.scale_factor().unwrap_or(1.0);
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
     let (mut c, mut win) = (Default::default(), RECT::default());
+    // From Windows, not w.scale_factor(): that's a round trip to the main thread, 20 times a second.
+    let s = unsafe { GetDpiForWindow(hwnd(w)) } as f64 / 96.0;
     unsafe {
         let _ = GetCursorPos(&mut c);
         let _ = GetWindowRect(hwnd(w), &mut win);
@@ -343,7 +578,8 @@ fn watch_click_through(w: WebviewWindow) {
         let r = *REGION.lock().unwrap();
         let key = |k: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY| unsafe { GetAsyncKeyState(k.0 as i32) } < 0;
         let over = on && over_pill(&w, r);
-        let t = on && r.h <= 36.0 && !key(VK_CONTROL);
+        // Not while tucked: the mouse coming near the sliver is what brings the island out.
+        let t = on && r.h <= 36.0 && !key(VK_CONTROL) && !tucked();
         if t != through {
             set_through(&w, t);
             through = t;
@@ -418,8 +654,30 @@ fn set_lyrics(app: AppHandle, on: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_window(app: AppHandle, click_through: Option<bool>, show_in_screenshots: Option<bool>, top_gap: Option<u32>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn set_window(
+    app: AppHandle,
+    click_through: Option<bool>,
+    show_in_screenshots: Option<bool>,
+    top_gap: Option<u32>,
+    style: Option<String>,
+    auto_hide: Option<bool>,
+    hide_fullscreen: Option<bool>,
+    hide_browsers: Option<bool>,
+    hide_maximized: Option<bool>,
+    hide_apps: Option<Vec<HiddenApp>>,
+) -> Result<(), String> {
     let mut s = load_settings(&app);
+    s.hide_fullscreen = hide_fullscreen.unwrap_or(s.hide_fullscreen);
+    s.hide_browsers = hide_browsers.unwrap_or(s.hide_browsers);
+    s.hide_maximized = hide_maximized.unwrap_or(s.hide_maximized);
+    if let Some(list) = hide_apps {
+        s.hide_apps = list;
+    }
+    s.auto_hide = auto_hide.unwrap_or(s.auto_hide);
+    if let Some(st) = style.filter(|st| ["pill", "notch", "bubble"].contains(&st.as_str())) {
+        s.style = st;
+    }
     s.top_gap = top_gap.or(s.top_gap);
     s.click_through = click_through.unwrap_or(s.click_through);
     s.show_in_screenshots = show_in_screenshots.unwrap_or(s.show_in_screenshots);
@@ -492,7 +750,7 @@ fn calendar() -> String {
 }
 
 fn open_settings(app: &AppHandle) {
-    open_window(app, "settings", "Pulo settings", (520.0, 640.0), false);
+    open_window(app, "settings", "Pulo settings", (920.0, 640.0), false);
 }
 
 /// Show the window `label` (index.html#label), creating it the first time.
@@ -557,12 +815,140 @@ fn set_autostart(on: bool) {
     }
 }
 
-/// True when a fullscreen app, game or presentation owns the foreground.
-fn fullscreen_app_active() -> bool {
-    matches!(
-        unsafe { SHQueryUserNotificationState() },
-        Ok(QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE)
-    )
+/// A fullscreen app owns the foreground: (hide, tuck). Games and presentations hide the
+/// island; any other fullscreen app (a video, a browser) tucks it into the top edge.
+// ---------- hiding over apps (browsers, maximized windows, picked apps) ----------
+
+/// An app the island hides over: its program's file name (lower case, no .exe) and the
+/// name to show for it.
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+struct HiddenApp {
+    exe: String,
+    name: String,
+}
+
+/// Program names of the common browsers.
+const BROWSERS: [&str; 15] = [
+    "chrome", "msedge", "firefox", "brave", "opera", "opera_gx", "vivaldi", "arc", "zen", "waterfox", "librewolf", "floorp", "thorium", "chromium", "iexplore",
+];
+
+/// Hide (not just tuck) over full-screen videos and other borderless full-screen apps.
+static HIDE_FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The saved rules: over browsers, over maximized windows, over these apps.
+static RULES: Mutex<(bool, bool, Vec<String>)> = Mutex::new((false, false, Vec::new()));
+/// "For an hour" from the menu: hidden until then (ms since 1970). Not saved.
+static SNOOZE_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The shortcut brought it out while a rule had it hidden: it stays out until it closes.
+static SHOWN_ANYWAY_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Whether the window is hidden now. It starts hidden; the first update shows it.
+static HIDDEN: Mutex<bool> = Mutex::new(true);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// The window in front and its program (path, and file name in lower case), unless it's Pulo's.
+fn front_app() -> Option<(HWND, String, String)> {
+    unsafe {
+        let fg = GetForegroundWindow();
+        let mut pid = 0;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if pid == 0 || pid == std::process::id() {
+            return None;
+        }
+        let path = tools::exe_path(pid)?;
+        let exe = std::path::Path::new(&path).file_stem()?.to_string_lossy().to_lowercase();
+        Some((fg, path, exe))
+    }
+}
+
+/// Whether a hide rule says the island shouldn't show right now.
+/// busy: a full-screen video or app is in front (fullscreen_app).
+fn hidden_by_rule(w: &WebviewWindow, busy: bool) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    let now = now_ms();
+    let at = SHOWN_ANYWAY_AT.load(Relaxed);
+    if at != 0 {
+        // Out by the shortcut: a few seconds to get going, then for as long as it's open.
+        if now.saturating_sub(at) < 3000 || REGION.lock().unwrap().h > 36.0 {
+            return false;
+        }
+        SHOWN_ANYWAY_AT.store(0, Relaxed);
+    }
+    if now < SNOOZE_UNTIL.load(Relaxed) {
+        return true;
+    }
+    // Never out from under the mouse: a click through the island brings the app below it to
+    // the front (often a maximized one), which would make it vanish as you click. The 1 s tick
+    // applies the rule once the mouse moves away.
+    if !*HIDDEN.lock().unwrap() && over_pill(w, *REGION.lock().unwrap()) {
+        return false;
+    }
+    if busy && HIDE_FULLSCREEN.load(Relaxed) {
+        return true;
+    }
+    let (browsers, maximized, apps) = RULES.lock().unwrap().clone();
+    if !browsers && !maximized && apps.is_empty() {
+        return false;
+    }
+    let Some((fg, _, exe)) = front_app() else { return false };
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+    (browsers && BROWSERS.contains(&exe.as_str()))
+        || apps.contains(&exe)
+        // Maximized on the screen the island is on, not just anywhere.
+        || (maximized
+            && unsafe { IsZoomed(fg).as_bool() && MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) == MonitorFromWindow(hwnd(w), MONITOR_DEFAULTTONEAREST) })
+}
+
+/// Show or hide the island: hidden over fullscreen apps and wherever a hide rule says.
+/// Called each second (tick) and the moment another window comes to the front.
+fn update_visibility(w: &WebviewWindow) {
+    let (exclusive, busy) = fullscreen_app();
+    let hide = exclusive || hidden_by_rule(w, busy);
+    let mut hidden = HIDDEN.lock().unwrap();
+    if hide != *hidden {
+        *hidden = hide;
+        // Through tao, so it knows: shown behind its back, its next style rebuild hid the
+        // island again. Not focusable, so showing doesn't activate it.
+        let _ = if hide { w.hide() } else { w.show() };
+    }
+}
+
+/// Ctrl+Alt+Space: if a rule has the island hidden, bring it out (and end "for an hour").
+pub(crate) fn shortcut_pressed() {
+    use std::sync::atomic::Ordering::Relaxed;
+    SNOOZE_UNTIL.store(0, Relaxed);
+    SHOWN_ANYWAY_AT.store(now_ms(), Relaxed);
+    if let Some(w) = sys::APP.get().and_then(|a| a.get_webview_window("main")) {
+        update_visibility(&w);
+    }
+}
+
+/// Re-check the moment another window comes to the front, so the island is already gone
+/// when the browser shows (the 1 s tick would leave it on screen for a moment).
+fn watch_foreground() {
+    use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+    unsafe extern "system" fn changed(_: HWINEVENTHOOK, _: u32, _: HWND, _: i32, _: i32, _: u32, _: u32) {
+        if let Some(w) = sys::APP.get().and_then(|a| a.get_webview_window("main")) {
+            update_visibility(&w);
+        }
+    }
+    unsafe {
+        let _ = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, None, Some(changed), 0, 0, WINEVENT_OUTOFCONTEXT);
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {}
+    }
+}
+
+/// The app that was in front when the quick menu opened (exe, name): its "Over …" item.
+static MENU_APP: Mutex<Option<HiddenApp>> = Mutex::new(None);
+
+fn fullscreen_app() -> (bool, bool) {
+    match unsafe { SHQueryUserNotificationState() } {
+        Ok(QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE) => (true, false),
+        Ok(QUNS_BUSY) => (false, true),
+        _ => (false, false),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -597,7 +983,9 @@ pub fn run() {
                 refresh_island(win.app_handle());
             }
         })
+        .on_menu_event(|app, e| quick_menu_clicked(app, e.id.as_ref()))
         .invoke_handler(tauri::generate_handler![
+            quick_menu,
             resize,
             refresh_transparency,
             open_mixer,
@@ -614,12 +1002,26 @@ pub fn run() {
             equalizer,
             set_lyrics,
             set_prefs,
+            island_keyboard,
             lyrics,
             tools::tools_state,
             tools::tool,
             tools::stats,
             tools::volume,
             tools::set_volume,
+            tools::set_muted,
+            clip::clip_history,
+            clip::clip_paste,
+            clip::clip_delete,
+            clip::clip_clear,
+            clip::clip_copy,
+            clip::clip_image,
+            tools::app_volumes,
+            tools::set_app_volume,
+            shots::screenshots,
+            shots::screenshot_image,
+            shots::open_screenshot,
+            shots::screenshot_full,
             tools::hotkey_ok,
             autostart_enabled,
             set_autostart,
@@ -645,6 +1047,7 @@ pub fn run() {
             apply_window_settings(app.handle(), &load_settings(app.handle()));
             let cw = w.clone();
             named("click-through", move || watch_click_through(cw));
+            named("foreground", watch_foreground);
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let updates = MenuItem::with_id(app, "update", "Check for updates", true, None::<&str>)?;
@@ -687,21 +1090,21 @@ pub fn run() {
             // ponytail: 1 Hz poll for fullscreen, monitor changes and notifications (~0% CPU).
             // Switch to ABN_FULLSCREENAPP / WM_DISPLAYCHANGE if this ever shows up in a profile.
             // Media is event-driven (sys::watch_media).
-            // Also hides on any fullscreen app, even one on a different monitor.
+            // Also hides or tucks on any fullscreen app, even one on a different monitor.
             named("tick", move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
                 let _ = tools::watch_mic();
-                let mut hidden = true; // window starts hidden; first tick shows it
                 let mut away = false;
                 let mut awake = false;
                 loop {
-                    let fs = fullscreen_app_active();
-                    if fs != hidden {
-                        hidden = fs;
-                        // Through tao, so it knows: shown behind its back, its next style rebuild
-                        // hid the island again. Not focusable, so showing doesn't activate it.
-                        let _ = if fs { w.hide() } else { w.show() };
+                    let (_, tuck) = fullscreen_app();
+                    if TUCKED.swap(tuck, std::sync::atomic::Ordering::Relaxed) != tuck {
+                        use tauri::Emitter;
+                        let _ = w.emit("tucked", tuck); // the pill slides up or down (.tucked)
+                        place(&w);
+                        apply_region(&w, w.scale_factor().unwrap_or(1.0));
                     }
+                    update_visibility(&w); // fullscreen apps and the hide rules
                     place(&w); // follows the mouse between screens; no-op when already there
                     // Windows drops the transparency now and then (focus and display changes),
                     // which paints the margin around the pill white. Put it back within a second.
@@ -735,4 +1138,17 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Pulo");
+}
+
+#[cfg(test)]
+mod hide_tests {
+    /// Reads the app in front, as the hide rules and the quick menu see it. Run by hand:
+    /// cargo test --lib front_app -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn front_app() {
+        let (_, path, exe) = super::front_app().expect("an app in front");
+        println!("front: {exe} ({}) browser: {}", super::tools::describe(&path).unwrap_or_default(), super::BROWSERS.contains(&exe.as_str()));
+        assert!(!exe.is_empty() && !exe.ends_with(".exe"));
+    }
 }

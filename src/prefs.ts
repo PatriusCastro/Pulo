@@ -12,6 +12,7 @@ export const FEATURES = [
   ["agents", "AI agents", "Claude Code sessions, and a notice when a long task finishes"],
   ["devices", "Device batteries", "Bluetooth mouse, keyboard and headphones"],
   ["focus", "Focus timer", "Pomodoro rounds and quick timers"],
+  ["todo", "To Do", "A checklist tab in the island"],
   ["tools", "Quick tools", "Dark mode, mic mute, keep awake, lock, Recycle Bin"],
   ["hotkey", "Keyboard shortcut", "Ctrl+Alt+Space opens and closes the island"],
   ["pet", "Pet", "The little sprout in the pill"],
@@ -32,10 +33,23 @@ export const SHORTCUTS: Record<string, string> = {
 /** Buttons that fit in one side column. Also MAX_SHORTCUTS in lib.rs. */
 export const MAX_SHORTCUTS = 5;
 
+/** Tabs of the open island, in their default order. */
+export const TAB_LABEL = { now: "Now", recent: "Recent", focus: "Focus", agents: "Agents", todo: "To Do", tools: "Tools" } as const;
+export type Tab = keyof typeof TAB_LABEL;
+const TABS = Object.keys(TAB_LABEL) as Tab[];
+
+/** How the island looks. Rust reads it too, for the window's shape and place (style in lib.rs). */
+export const STYLES = [
+  ["pill", "Pill", "Floats just below the top of the screen"],
+  ["notch", "Notch", "Grows out of the top edge of the screen"],
+  ["bubble", "Bubble", "A small dot until you point at it"],
+] as const;
+
 export type Prefs = {
   openOn: "click" | "hover"; // click: hovering only peeks; hover: hovering opens it fully
   left: string[];
   right: string[];
+  tabs: Tab[];
   pomodoro: Config;
 };
 
@@ -43,6 +57,7 @@ export const DEFAULT_PREFS: Prefs = {
   openOn: "click",
   left: ["settings", "mixer", "task_manager"],
   right: ["calculator", "screenshot", "explorer", "clipboard"],
+  tabs: TABS,
   pomodoro: POMODORO,
 };
 
@@ -54,6 +69,12 @@ export type Settings = {
   click_through?: boolean;
   show_in_screenshots?: boolean;
   top_gap?: number | null;
+  style?: string; // STYLES; anything else is "pill"
+  auto_hide?: boolean;
+  hide_fullscreen?: boolean; // hidden, not tucked, over full-screen videos
+  hide_browsers?: boolean; // hidden while a browser is in front
+  hide_maximized?: boolean; // hidden while the window in front is maximized
+  hide_apps?: { exe: string; name: string }[]; // hidden while one of these is in front
 };
 export const EMPTY_SETTINGS: Settings = { calendar_url: "", lyrics: false, off: [], ui: null };
 
@@ -66,6 +87,8 @@ export function prefsOf(s: Settings): Prefs {
     openOn: ui.openOn === "hover" ? "hover" : "click",
     left: pick(ui.left, DEFAULT_PREFS.left),
     right: pick(ui.right, DEFAULT_PREFS.right),
+    // Saved order first, then any tab added since.
+    tabs: [...new Set([...(Array.isArray(ui.tabs) ? ui.tabs : []), ...TABS])].filter((t) => TABS.includes(t)),
     pomodoro: { ...POMODORO, ...ui.pomodoro },
   };
 }

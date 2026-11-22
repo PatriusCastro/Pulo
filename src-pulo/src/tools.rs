@@ -107,12 +107,22 @@ fn speakers() -> Result<IAudioEndpointVolume> {
     }
 }
 
-/// Master volume of the default speakers, 0..1 (0 when muted).
+/// Master volume of the default speakers, 0..1, and whether they're muted (muting keeps the
+/// level, as Windows does).
 #[tauri::command]
-pub async fn volume() -> f32 {
+pub async fn volume() -> (f32, bool) {
     speakers()
-        .and_then(|v| unsafe { Ok(if v.GetMute()?.as_bool() { 0.0 } else { v.GetMasterVolumeLevelScalar()? }) })
-        .unwrap_or(0.0)
+        .and_then(|v| unsafe { Ok((v.GetMasterVolumeLevelScalar()?, v.GetMute()?.as_bool())) })
+        .unwrap_or((0.0, false))
+}
+
+#[tauri::command]
+pub async fn set_muted(on: bool) {
+    if let Ok(v) = speakers() {
+        unsafe {
+            let _ = v.SetMute(on, std::ptr::null());
+        }
+    }
 }
 
 #[tauri::command]
@@ -261,6 +271,7 @@ pub fn watch_hotkey() {
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_HOTKEY {
+                crate::shortcut_pressed(); // shows it first if a hide rule has it hidden
                 if let Some(app) = APP.get() {
                     let _ = app.emit("hotkey", ());
                 }
@@ -321,5 +332,138 @@ mod tests {
         assert!((1..=100).contains(&s.mem), "mem {}", s.mem);
         assert!(s.down >= 0.0 && s.up >= 0.0);
         assert!(s.gpu == -1.0 || (0.0..=100.0).contains(&s.gpu), "gpu {}", s.gpu);
+    }
+}
+
+// ---------- per-app volume (the island's mixer) ----------
+
+#[derive(Serialize)]
+pub struct AppVolume {
+    name: String,
+    level: f32,
+    muted: bool,
+}
+
+/// Audio sessions on the default speakers grouped by app (a browser has several), System
+/// sounds last. Expired sessions are left out.
+fn app_sessions() -> Result<Vec<(String, Vec<ISimpleAudioVolume>)>> {
+    use windows::core::Interface;
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        let mgr: IAudioSessionManager2 = en.GetDefaultAudioEndpoint(eRender, eConsole)?.Activate(CLSCTX_ALL, None)?;
+        let list = mgr.GetSessionEnumerator()?;
+        let mut apps: Vec<(String, Vec<ISimpleAudioVolume>)> = vec![];
+        for i in 0..list.GetCount()? {
+            let s = list.GetSession(i)?;
+            if s.GetState()? == AudioSessionStateExpired {
+                continue;
+            }
+            let s2: IAudioSessionControl2 = s.cast()?;
+            let name = if s2.IsSystemSoundsSession() == windows::Win32::Foundation::S_OK {
+                "System sounds".to_string()
+            } else {
+                match app_name(s2.GetProcessId()?) {
+                    Some(n) => n,
+                    None => continue,
+                }
+            };
+            let vol: ISimpleAudioVolume = s.cast()?;
+            match apps.iter_mut().find(|(n, _)| *n == name) {
+                Some((_, v)) => v.push(vol),
+                None => apps.push((name, vec![vol])),
+            }
+        }
+        apps.sort_by_key(|(n, _)| n == "System sounds");
+        Ok(apps)
+    }
+}
+
+/// An app's name as it describes itself ("Google Chrome"), else its file name ("chrome").
+fn app_name(pid: u32) -> Option<String> {
+    let path = exe_path(pid)?;
+    describe(&path).or_else(|| std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()))
+}
+
+/// The full path of a process's program.
+pub(crate) fn exe_path(pid: u32) -> Option<String> {
+    use windows::{
+        core::PWSTR,
+        Win32::{Foundation::CloseHandle, System::Threading::*},
+    };
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len);
+        let _ = CloseHandle(h);
+        ok.ok()?;
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+/// FileDescription from the program's version info, in its first listed language.
+pub(crate) fn describe(path: &str) -> Option<String> {
+    use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+    let file: Vec<u16> = path.encode_utf16().chain([0]).collect();
+    unsafe {
+        let size = GetFileVersionInfoSizeW(PCWSTR(file.as_ptr()), None);
+        if size == 0 {
+            return None;
+        }
+        let mut data = vec![0u8; size as usize];
+        GetFileVersionInfoW(PCWSTR(file.as_ptr()), None, size, data.as_mut_ptr() as _).ok()?;
+        let (mut p, mut n) = (std::ptr::null_mut(), 0u32);
+        if !VerQueryValueW(data.as_ptr() as _, w!(r"\VarFileInfo\Translation"), &mut p, &mut n).as_bool() || n < 4 {
+            return None;
+        }
+        let (lang, cp) = (*(p as *const u16), *(p as *const u16).add(1));
+        let key: Vec<u16> = format!(r"\StringFileInfo\{lang:04x}{cp:04x}\FileDescription").encode_utf16().chain([0]).collect();
+        if !VerQueryValueW(data.as_ptr() as _, PCWSTR(key.as_ptr()), &mut p, &mut n).as_bool() || n == 0 {
+            return None;
+        }
+        let s = String::from_utf16_lossy(std::slice::from_raw_parts(p as *const u16, n as usize));
+        let s = s.trim_end_matches('\0').trim();
+        (!s.is_empty()).then(|| s.to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn app_volumes() -> Vec<AppVolume> {
+    let apps = app_sessions().unwrap_or_default();
+    apps.into_iter()
+        .filter_map(|(name, v)| unsafe {
+            let s = v.first()?;
+            Some(AppVolume { name, level: s.GetMasterVolume().ok()?, muted: s.GetMute().ok()?.as_bool() })
+        })
+        .collect()
+}
+
+/// Sets every session of the app (by the name app_volumes gave).
+#[tauri::command]
+pub async fn set_app_volume(name: String, level: Option<f32>, muted: Option<bool>) {
+    for (_, v) in app_sessions().unwrap_or_default().into_iter().filter(|(n, _)| *n == name) {
+        for s in v {
+            unsafe {
+                if let Some(l) = level {
+                    let _ = s.SetMasterVolume(l.clamp(0.0, 1.0), std::ptr::null());
+                }
+                if let Some(m) = muted {
+                    let _ = s.SetMute(m, std::ptr::null());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod mixer_tests {
+    // Lists the real mixer. Run: cargo test mixer -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn mixer_lists_apps() {
+        for a in tauri::async_runtime::block_on(super::app_volumes()) {
+            println!("{} {:.2} {}", a.name, a.level, a.muted);
+        }
     }
 }

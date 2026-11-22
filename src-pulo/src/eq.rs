@@ -100,6 +100,7 @@ fn capture() -> Result<()> {
         let mut filters: Vec<Biquad> = BANDS.iter().map(|&f| Biquad::bandpass(f.min(fs * 0.45), fs, 1.4)).collect();
         let mut shown = [0f32; 5];
         let mut avg = [0f32; 5];
+        let mut sent = [0f32; 5];
         client.Start()?;
         while ON.load(Relaxed) {
             thread::sleep(Duration::from_millis(INTERVAL_MS.load(Relaxed)));
@@ -120,13 +121,20 @@ fn capture() -> Result<()> {
                 }
                 cap.ReleaseBuffer(frames)?;
             }
+            // Fall at the same speed whatever the frame rate (0.7 per 50 ms).
+            let k = 0.7f32.powf(INTERVAL_MS.load(Relaxed) as f32 / 50.0);
             for ((s, a), e) in shown.iter_mut().zip(avg.iter_mut()).zip(energy) {
                 let target = bounce(level(e, n), a);
                 // Jump up instantly, fall back gently.
-                *s = if target > *s { target } else { *s * 0.7 + target * 0.3 };
+                *s = if target > *s { target } else { *s * k + target * (1.0 - k) };
             }
-            if let Some(app) = APP.get() {
-                let _ = app.emit("eq", shown);
+            // Each frame costs the page a restyle and a repaint: skip ones nobody could see
+            // (under half a pixel), such as quiet passages and bars that have settled.
+            if shown.iter().zip(&sent).any(|(a, b)| (a - b).abs() > 0.02) {
+                sent = shown;
+                if let Some(app) = APP.get() {
+                    let _ = app.emit("eq", shown);
+                }
             }
         }
         let _ = client.Stop();

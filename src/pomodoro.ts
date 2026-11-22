@@ -61,3 +61,7 @@ export const reset = (p: Pomo, cfg: Config, now: number): Pomo => ({ ...initial(
 /** A phase that hasn't been started follows a changed length setting. */
 export const resize = (p: Pomo, old: Config, cfg: Config): Pomo =>
   p.end === null && p.left === length(p.phase, old) ? { ...p, left: length(p.phase, cfg) } : p;
+
+/** Jump to a spot in the cycle (a phase and the focus rounds finished before it), stopped at
+ *  its full length. Today's count is kept. */
+export const jump = (p: Pomo, phase: Phase, round: number, cfg: Config): Pomo => ({ ...p, phase, round, end: null, left: length(phase, cfg) });

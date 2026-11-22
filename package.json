@@ -11,7 +11,7 @@
     "start": "tauri dev",
     "exe": "tauri build --no-bundle",
     "exe:debug": "tauri build --debug --no-bundle",
-    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts && node --experimental-strip-types --no-warnings scripts/lyrics.check.ts && node --experimental-strip-types --no-warnings scripts/pomodoro.check.ts",
+    "check": "node --experimental-strip-types --no-warnings scripts/ics.check.ts && node --experimental-strip-types --no-warnings scripts/lyrics.check.ts && node --experimental-strip-types --no-warnings scripts/pomodoro.check.ts && node --experimental-strip-types --no-warnings scripts/calc.check.ts && node --experimental-strip-types --no-warnings scripts/markdown.check.ts",
     "site": "vite build --config site/vite.config.ts",
     "msix": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/msix.ps1"
   },

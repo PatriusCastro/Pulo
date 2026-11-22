@@ -5,6 +5,8 @@
   --chip: rgba(255, 255, 255, 0.1);
   /* Smooth deceleration, no overshoot: the window region clips anything past the final size. */
   --morph: cubic-bezier(0.32, 0.72, 0, 1);
+  /* One knob for how fast the island grows, shrinks and crossfades: 1 = the original timing. */
+  --pace: 1.4;
   --feather: 0 0 1.5px 0.5px rgba(0, 0, 0, 0.6);
 }
 
@@ -51,7 +53,7 @@ button:focus-visible {
 /* Shortcuts beside the open island: one 48 px column on each side (MAX in lib.rs). */
 .side {
   position: fixed;
-  top: 2px; /* level with the pill (EDGE in lib.rs) */
+  top: calc(2px + var(--drop, 0px)); /* level with the pill (EDGE in lib.rs) */
   width: 48px;
   display: flex;
   flex-direction: column;
@@ -62,8 +64,8 @@ button:focus-visible {
   transform: scale(0.85);
   pointer-events: none;
   transition:
-    opacity 0.2s ease,
-    transform 0.3s var(--morph);
+    opacity calc(0.2s * var(--pace)) ease,
+    transform calc(0.3s * var(--pace)) var(--morph);
 }
 .side:first-child {
   left: 0;
@@ -75,7 +77,7 @@ button:focus-visible {
   opacity: 1;
   transform: none;
   pointer-events: auto;
-  transition-delay: 0.12s; /* after the pill has mostly grown */
+  transition-delay: calc(0.12s * var(--pace)); /* after the pill has mostly grown */
 }
 .shortcut {
   width: 40px;
@@ -96,7 +98,9 @@ button:focus-visible {
   position: fixed;
   top: 2px; /* EDGE in lib.rs: room for the smooth edge above it too */
   left: 50%;
-  transform: translateX(-50%);
+  /* --drop: hiding until the mouse comes near puts the window on the screen's top edge so the
+     pill can tuck into it; out, it comes down to the chosen gap (App.tsx, apply_region). */
+  transform: translate(-50%, var(--drop, 0px));
   width: 200px;
   height: 36px;
   border-radius: 18px;
@@ -106,20 +110,78 @@ button:focus-visible {
      100% scaling. Stays inside the 2 px margin the window region leaves (apply_region). */
   box-shadow: var(--feather);
   transition:
-    width 0.34s var(--morph),
-    height 0.34s var(--morph),
-    border-radius 0.34s var(--morph);
+    width calc(0.34s * var(--pace)) var(--morph),
+    height calc(0.34s * var(--pace)) var(--morph),
+    border-radius calc(0.34s * var(--pace)) var(--morph),
+    transform calc(0.34s * var(--pace)) var(--morph);
+}
+/* Tucked (auto-hide, or over a fullscreen video): at rest, all but 4 px (TUCK_SHOW in
+   lib.rs) slides up past the top of the screen; Rust keeps the window flush with it. */
+.tucked.rest > .pill {
+  transform: translate(-50%, calc(-100% + 4px));
+}
+.tucked.rest > .ears {
+  transform: translate(-50%, -100%);
 }
 /* Hovering: wider, same height. Quicker than opening, it should feel like a nudge. */
 .pill.peek {
   width: 360px;
-  transition-duration: 0.26s;
+  transition-duration: calc(0.26s * var(--pace));
 }
 .pill.open {
   width: 420px;
   height: 268px;
   border-radius: 30px;
-  transition-duration: 0.42s;
+  transition-duration: calc(0.42s * var(--pace));
+}
+
+/* Notch: flush with the top of the screen (Rust places it), square on top, and an 8 px
+   inward curve on each side where it meets the edge (EAR in lib.rs). */
+.notch .pill {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.ears {
+  position: fixed;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 216px; /* the pill plus an ear each side */
+  height: 8px;
+  color: #000;
+  /* Each tile reaches 2 px into the pill, solid there: ending exactly on the pill's soft,
+     feathered edge left a faint light seam between the two at 150%. */
+  background:
+    radial-gradient(circle at 0 100%, transparent 7.5px, currentColor 8.5px) left / 10px 8px no-repeat,
+    radial-gradient(circle at 100% 100%, transparent 7.5px, currentColor 8.5px) right / 10px 8px no-repeat;
+  pointer-events: none;
+  transition:
+    width calc(0.34s * var(--pace)) var(--morph),
+    transform calc(0.34s * var(--pace)) var(--morph);
+}
+.ears.tinted {
+  color: var(--tint);
+}
+.peek > .ears {
+  width: 376px;
+  transition-duration: calc(0.26s * var(--pace));
+}
+.open > .ears {
+  width: 436px;
+  transition-duration: calc(0.42s * var(--pace));
+}
+
+/* Bubble: at rest, just the right-hand slot (status dot, equalizer, mic) in a circle. */
+.bubble .pill.rest,
+.bubble .mini-layer {
+  width: 36px;
+}
+.bubble .mini {
+  padding: 0;
+  justify-content: center;
+}
+.bubble .mini > :not(:last-child) {
+  display: none;
 }
 
 /* Layers keep their own fixed size, centered at the top, and crossfade. */
@@ -130,17 +192,20 @@ button:focus-visible {
   box-sizing: border-box;
   transform: translateX(-50%);
   transform-origin: top center;
+  /* Own compositor layers from the start: promoting them when a transition begins costs
+     a raster on its first frame, the hitch at the start of opening. No cost while still. */
+  will-change: opacity, transform, filter;
   transition:
-    opacity 0.14s ease,
-    filter 0.14s ease,
-    transform 0.3s var(--morph);
+    opacity calc(0.14s * var(--pace)) ease,
+    filter calc(0.14s * var(--pace)) ease,
+    transform calc(0.3s * var(--pace)) var(--morph);
 }
 
 /* collapsed */
 .mini-layer {
   width: 200px;
   height: 36px;
-  transition-delay: 0.12s; /* reappear once the pill has mostly shrunk */
+  transition-delay: calc(0.12s * var(--pace)); /* reappear once the pill has mostly shrunk */
 }
 .open .mini-layer,
 .peek .mini-layer {
@@ -159,7 +224,7 @@ button:focus-visible {
 .peek .peek-layer {
   opacity: 1;
   pointer-events: auto;
-  transition-delay: 0.08s;
+  transition-delay: calc(0.08s * var(--pace));
 }
 .peek-layer .hud-text {
   max-width: 280px;
@@ -304,9 +369,9 @@ button:focus-visible {
   transform: translateX(-50%);
   pointer-events: auto;
   transition:
-    opacity 0.24s ease 0.1s,
-    filter 0.24s ease 0.1s,
-    transform 0.42s var(--morph);
+    opacity calc(0.24s * var(--pace)) ease calc(0.1s * var(--pace)),
+    filter calc(0.24s * var(--pace)) ease calc(0.1s * var(--pace)),
+    transform calc(0.42s * var(--pace)) var(--morph);
 }
 .media {
   display: flex;
@@ -344,14 +409,6 @@ button:focus-visible {
 .sub {
   color: var(--dim);
   margin-top: 2px;
-}
-.sub-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.sub-row .sub {
-  min-width: 0;
 }
 .eq {
   flex: none;
@@ -412,29 +469,74 @@ button:focus-visible {
 .icon-btn.on {
   color: var(--accent);
 }
-/* Now: song, then its position bar with the music page button at its end. */
+/* Now: a card washed in the cover's colour (--tint on .island; grey without a cover). The
+   song on top, its position across the card, the controls centred under it. */
 .player {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 12px 14px 6px;
+  border-radius: 20px;
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--tint, #48484a) 55%, transparent), transparent 80%),
+    #121214;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
-.player-row {
+.player .media {
+  gap: 12px;
+}
+.player .art {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.player .title {
+  font-size: 15px;
+}
+.player .sub {
+  font-size: 12px;
+}
+/* Equalizer and the music page button, top right. */
+.player-corner {
+  align-self: flex-start;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
-.player-row .progress-row {
-  flex: 1;
+.player-corner .eq {
+  margin: 0;
 }
-.music-open {
-  margin-left: auto;
+.player-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+.player-controls .controls {
+  gap: 12px;
+}
+.player-controls .play {
+  width: 42px;
+  height: 42px;
+}
+.slot-btn {
+  width: 28px;
+  display: flex;
+  justify-content: center;
+}
+.icon-btn:hover {
+  color: var(--fg);
+}
+.icon-btn.on:hover {
+  color: var(--accent);
 }
 /* "Also playing": a second player; click to show it instead. */
 .also {
   justify-content: space-between;
   gap: 8px;
   padding: 4px 8px;
-  margin: 0 -8px;
+  margin: 0 -6px;
   font-size: 12px;
   color: var(--dim);
 }
@@ -445,9 +547,6 @@ button:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.music-open:hover {
-  color: var(--fg);
 }
 .controls .play {
   width: 40px;
@@ -472,20 +571,34 @@ button:focus-visible {
 .progress-row .time:last-child {
   text-align: right;
 }
+/* A 4 px line in a 16 px tall hit area; pointing at it thickens the line and shows the knob. */
 .slider {
   flex: 1;
-  height: 4px;
+  height: 16px;
   margin: 0;
   appearance: none;
-  border-radius: 2px;
-  background: linear-gradient(to right, var(--fg) var(--pct), rgba(255, 255, 255, 0.18) var(--pct));
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--fg) var(--pct), rgba(255, 255, 255, 0.18) var(--pct)) center / 100% 4px no-repeat;
+  transition: background-size 0.15s ease;
+}
+.slider:hover,
+.slider:active {
+  background-size: 100% 6px;
 }
 .slider::-webkit-slider-thumb {
   appearance: none;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--fg);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.25);
+  transform: scale(0);
+  transition: transform 0.15s ease;
+}
+.slider:hover::-webkit-slider-thumb,
+.slider:active::-webkit-slider-thumb,
+.slider:focus-visible::-webkit-slider-thumb {
+  transform: scale(1);
 }
 .slider:disabled::-webkit-slider-thumb {
   visibility: hidden;
@@ -494,8 +607,28 @@ button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
-.slider.volume {
-  max-width: 140px;
+/* Music page volume: speaker (mute), slider, level. Fills the row between shuffle/repeat and lyrics. */
+.volume-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+.vol-pct {
+  width: 24px;
+  font-size: 11px;
+  color: var(--dim);
+  text-align: right;
+}
+/* Muted keeps the level: the slider stays where it was, greyed, until unmuted or moved. */
+.volume-row.muted .slider,
+.volume-row.muted .vol-pct {
+  opacity: 0.4;
+}
+.volume-row.muted .icon-btn {
+  color: var(--fg);
 }
 .music-row .icon-btn:last-child {
   margin-left: auto;
@@ -554,9 +687,10 @@ button:focus-visible {
 .pill {
   background-color: #000;
   transition:
-    width 0.34s var(--morph),
-    height 0.34s var(--morph),
-    border-radius 0.34s var(--morph),
+    width calc(0.34s * var(--pace)) var(--morph),
+    height calc(0.34s * var(--pace)) var(--morph),
+    border-radius calc(0.34s * var(--pace)) var(--morph),
+    transform calc(0.34s * var(--pace)) var(--morph), /* tucking */
     background-color 0.5s ease;
 }
 .pill.tinted {
@@ -623,6 +757,42 @@ button:focus-visible {
 .controls button {
   width: 36px;
   height: 36px;
+  transition:
+    transform 0.12s ease,
+    background-color 0.12s ease;
+}
+.controls button:active {
+  transform: scale(0.88); /* a press you can feel */
+}
+/* The art opens the music page; it sinks a little while paused, like a phone's player. */
+.art-btn {
+  flex: none;
+  border-radius: 12px;
+  transition: transform calc(0.36s * var(--pace)) var(--morph);
+}
+.art-btn:hover {
+  background: none;
+  transform: scale(1.04);
+}
+.art-btn.paused {
+  transform: scale(0.9);
+}
+.art-btn.paused:hover {
+  transform: scale(0.94);
+}
+.song {
+  cursor: default;
+}
+/* A new song (or its cover) fades in rather than snapping. */
+.song,
+.art {
+  animation: song-in calc(0.32s * var(--pace)) ease;
+}
+@keyframes song-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 /* The player (or the clock) sits centred in the tab, not stuck to the tabs with a hole underneath. */
 .tab-body > .player,
@@ -637,20 +807,39 @@ button:focus-visible {
 }
 /* tabs */
 .tabs {
+  position: relative;
   display: flex;
   justify-content: center;
   gap: 4px;
   flex: none;
 }
 .tab {
+  position: relative; /* above the highlight */
   padding: 3px 12px;
   font-size: 12px;
   color: var(--dim);
+  transition: color calc(0.2s * var(--pace)) ease;
 }
 .tab.on {
-  background: var(--chip);
   color: var(--fg);
   font-weight: 600;
+}
+.tab.on:hover {
+  background: none; /* the highlight is already behind it */
+}
+/* The current tab's highlight, measured and moved by App.tsx: it glides between tabs. */
+.tab-ind {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+  background: var(--chip);
+}
+.tab-ind.slide {
+  transition:
+    transform calc(0.3s * var(--pace)) var(--morph),
+    width calc(0.3s * var(--pace)) var(--morph);
 }
 .tab-body {
   flex: 1;
@@ -660,152 +849,207 @@ button:focus-visible {
   justify-content: space-between;
   gap: 8px;
 }
+/* A new page slides in from the side it's on (page-fwd / page-back, set in App.tsx). Once,
+   on the compositor: nothing keeps running afterwards. */
+.page-fwd {
+  animation: page-fwd calc(0.3s * var(--pace)) var(--morph);
+}
+.page-back {
+  animation: page-back calc(0.3s * var(--pace)) var(--morph);
+}
+@keyframes page-fwd {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+@keyframes page-back {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
 
-/* focus */
-/* Fills the space above the quick timer, timer and controls centred in it. */
-.focus {
+/* focus: phase and round, the time with its controls, then the whole cycle as a bar. */
+.pomo {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center; /* ring and controls as one centred group */
-  gap: 32px;
-  padding: 0 6px;
-}
-.ring {
-  position: relative;
-  flex: none;
-  width: 120px;
-  height: 120px;
-}
-.ring circle {
-  fill: none;
-  stroke-width: 5;
-}
-.ring .track {
-  stroke: var(--chip);
-}
-/* Redrawn once a second, no transition: see the note on .dot.working. */
-.ring .progress {
-  stroke: var(--accent);
-  stroke-linecap: round;
-}
-.ring .progress.break {
-  stroke: #5ac8fa;
-}
-.ring-time {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  font-size: 28px;
+  gap: 12px;
+  padding: 0 4px;
+}
+.pomo-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
 }
-.focus-side {
-  min-width: 0;
-}
-.phase-label {
-  font-size: 18px;
-  font-weight: 600;
-}
-/* One dot per focus round in the cycle: done, current, still to come. */
-.rounds {
+.pomo-main {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+}
+.pomo-time {
+  font-size: 52px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.pomo-time.paused {
+  opacity: 0.5;
+}
+.pomo-hint {
   margin-top: 6px;
-}
-.rounds span:not(.sub) {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--chip);
-}
-.rounds span.done {
-  background: var(--accent);
-}
-.rounds span.now {
-  box-shadow: inset 0 0 0 1.5px var(--accent);
-}
-.rounds .sub {
-  margin-left: 6px;
   font-size: 12px;
+  color: var(--dim);
 }
-.focus-controls {
+.pomo-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 16px;
+  gap: 10px;
 }
-.focus-controls button {
+.pomo-controls button {
   width: 36px;
   height: 36px;
   color: var(--dim);
 }
-.focus-controls button:hover {
+.pomo-controls button:hover {
   color: var(--fg);
 }
-.focus-controls .primary {
-  width: auto;
-  gap: 6px;
-  padding: 0 18px 0 14px;
-  margin-right: 4px;
-  background: var(--chip);
-  color: var(--fg);
-  font-weight: 600;
-}
-.focus-controls .primary:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-/* Start / Resume: the one thing to press, in the phase's colour. */
-.focus-controls .primary.go {
-  background: var(--accent);
+/* Start in the phase's colour; while running it turns white, like the music player's. */
+.pomo-controls .pomo-play {
+  width: 52px;
+  height: 52px;
   color: #000;
+  background: var(--accent);
+  transition: transform 0.12s ease;
 }
-.focus-controls .primary.go.break {
+.pomo-controls .pomo-play.break {
   background: #5ac8fa;
 }
-.focus-controls .primary.go:hover {
+.pomo-controls .pomo-play.running {
+  background: var(--fg);
+}
+.pomo-controls .pomo-play:hover {
+  color: #000;
   filter: brightness(1.1);
+}
+.pomo-play:active {
+  transform: scale(0.92);
+}
+/* Each segment is a 16 px tall button around a 6 px line; past ones full, the current one
+   filling (--fill, redrawn once a second, no transition), later ones empty. */
+.cycle {
+  display: flex;
+  gap: 4px;
+}
+.seg {
+  display: block;
+  position: relative;
+  flex-basis: 0;
+  min-width: 10px;
+  height: 16px;
+  border-radius: 4px;
+}
+.seg:hover {
+  background: none;
+}
+.seg::before {
+  content: "";
+  position: absolute;
+  inset: 5px 0;
+  border-radius: 3px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / var(--fill) 100% no-repeat,
+    rgba(255, 255, 255, 0.12);
+  opacity: 0.55;
+}
+.seg.now::before {
+  opacity: 1;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / var(--fill) 100% no-repeat,
+    color-mix(in srgb, currentColor 30%, transparent);
+}
+.seg:hover::before {
+  inset: 4px 0;
+  opacity: 1;
 }
 
 /* agents */
+/* One card per session: title over project and model, status and time on the right.
+   Working sessions are tinted orange and come first. */
 .agent-list {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
-.agent-row {
+.agent-card {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 26px;
-  font-size: 12px;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.agent-card.busy {
+  background: rgba(255, 159, 67, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 159, 67, 0.22);
+}
+.agent-card .dot {
+  flex: none;
+}
+.agent-text {
+  flex: 1;
+  min-width: 0;
+}
+.agent-card .agent-title {
+  font-size: 13px;
+  font-weight: 600;
 }
 .agent-meta {
-  max-width: 140px;
+  font-size: 11px;
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-time {
+.agent-when {
   flex: none;
-  min-width: 52px;
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11px;
   color: var(--dim);
+}
+.agent-state {
+  font-weight: 600;
+}
+.busy .agent-state {
+  color: #ff9f43;
 }
 .empty-note {
   margin: auto 0; /* middle of the panel */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   text-align: center;
   font-size: 12px;
   color: var(--dim);
 }
-.dot.idle {
+.empty-note svg {
+  opacity: 0.6;
+}
+.dot.resting {
   background: var(--dim);
 }
 
@@ -819,24 +1063,95 @@ button:focus-visible {
   overflow-y: auto;
   scrollbar-width: none;
 }
+/* Icon in its kind's colour, the text, then the time; pointing at a row swaps the time
+   for a remove button. Downloads open when clicked. */
 .recent-row {
   flex: none;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 26px;
-  padding: 0 6px;
-  border-radius: 8px;
+  height: 32px;
+  padding: 0 6px 0 4px;
+  border-radius: 10px;
   font-size: 12px;
-  color: var(--dim);
 }
-.recent-row .recent-text {
+.recent-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.recent-main {
   flex: 1;
   min-width: 0;
-  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  border-radius: 8px;
+}
+button.recent-main:hover {
+  background: none;
+}
+button.recent-main:hover .recent-text {
+  text-decoration: underline;
+}
+.recent-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.badge {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--dim);
+}
+.badge.k-download,
+.badge.k-focus {
+  background: rgba(61, 220, 132, 0.15);
+  color: var(--accent);
+}
+.badge.k-agent {
+  background: rgba(255, 159, 67, 0.15);
+  color: #ff9f43;
+}
+.badge.k-timer {
+  background: rgba(90, 200, 250, 0.15);
+  color: #5ac8fa;
+}
+.recent-time {
+  flex: none;
+  color: var(--dim);
+}
+.recent-x {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  color: var(--dim);
+  opacity: 0;
+}
+.recent-x:hover {
+  color: var(--fg);
+}
+.recent-row:hover .recent-x,
+.recent-x:focus-visible {
+  opacity: 1;
+}
+.recent-row:hover .recent-time,
+.recent-row:has(.recent-x:focus-visible) .recent-time {
+  visibility: hidden;
+}
+.recent-day {
+  flex: none;
+  padding: 6px 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim);
 }
 .bar .chip {
   padding: 2px 10px;
@@ -943,6 +1258,7 @@ button:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .pill,
+  .ears,
   .layer,
   .open .panel,
   .meter > div {
@@ -953,8 +1269,19 @@ button:focus-visible {
   .lyrics,
   .lyric-mini,
   .center,
-  .pet.happy {
+  .pet.happy,
+  .page-fwd,
+  .page-back,
+  .song,
+  .art {
     animation: none;
+  }
+  .tab-ind.slide,
+  .art-btn,
+  .controls button,
+  .slider,
+  .slider::-webkit-slider-thumb {
+    transition: none;
   }
 }
 
@@ -969,4 +1296,465 @@ button:focus-visible {
 .mq-track {
   display: inline-flex;
   gap: 40px; /* MARQUEE_GAP */
+}
+/* ---------- shortcut pages (IslandTools.tsx): clipboard, calculator, mixer, screenshot ---------- */
+.shortcut.on {
+  background: var(--fg);
+  color: #000;
+}
+.tool {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tool-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+.tool-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.tool-hint {
+  font-size: 12px;
+  color: var(--dim);
+}
+.tool-hint.pad {
+  padding: 8px 4px;
+}
+.tool-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.tool-actions .chip {
+  padding: 2px 10px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.tool-error {
+  padding: 4px;
+  font-size: 12px;
+  color: #ff6b5e;
+}
+.empty-note .chip {
+  padding: 4px 12px;
+  background: var(--chip);
+  color: var(--fg);
+}
+
+/* Clipboard: a bento grid of cards (sizes set in IslandTools.tsx). */
+.clip-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 66px;
+  grid-auto-flow: dense;
+  gap: 6px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.clip-grid .tool-error {
+  grid-column: 1 / -1;
+}
+.clip-card {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+  transition: transform 0.12s ease;
+}
+.clip-card:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.clip-card:active {
+  transform: scale(0.97);
+}
+.clip-card.wide {
+  grid-column: span 2;
+}
+.clip-card.tall {
+  grid-row: span 2;
+}
+.clip-main {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 0;
+}
+.clip-main:hover {
+  background: none;
+}
+.clip-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  word-break: break-word;
+}
+.clip-card.tall .clip-text {
+  -webkit-line-clamp: 6;
+}
+.clip-text.link {
+  color: var(--accent);
+}
+.clip-time {
+  font-size: 10px;
+  color: var(--dim);
+}
+/* An image fills its tile; the time sits on a shade at the bottom. */
+.clip-card.image .clip-main {
+  padding: 0;
+  justify-content: center;
+  align-items: center;
+  color: var(--dim);
+}
+.clip-card.image img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.clip-card.image .clip-time {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 10px 6px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  color: #fff;
+  text-align: left;
+}
+.clip-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--fg);
+  opacity: 0;
+}
+.clip-x:hover {
+  background: #000;
+}
+.clip-card:hover .clip-x,
+.clip-x:focus-visible {
+  opacity: 1;
+}
+
+/* Calculator: the sum and its result on the left, keys on the right. */
+.calc {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+}
+.calc-screen {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 4px 6px;
+  overflow: hidden;
+}
+.calc-expr {
+  max-width: 100%;
+  font-size: 14px;
+  color: var(--dim);
+  display: flex;
+  justify-content: flex-end; /* a long sum overflows to the left: its end stays in view */
+  white-space: nowrap;
+  overflow: hidden;
+}
+.calc-result {
+  max-width: 100%;
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.calc-result.long {
+  font-size: 26px;
+}
+.calc-keys {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, 46px);
+  grid-template-rows: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+}
+.key {
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 15px;
+  font-weight: 500;
+  transition: transform 0.1s ease;
+}
+.key:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.key:active {
+  transform: scale(0.92);
+}
+.key.fn {
+  background: rgba(255, 255, 255, 0.22);
+}
+.key.op {
+  background: #ff9f0a;
+  color: #fff;
+  font-size: 18px;
+}
+.key.op:hover {
+  background: #ffb340;
+}
+.key.equals {
+  background: var(--accent);
+  color: #000;
+}
+
+/* Mixer: the speakers first, then each app playing sound. */
+.mix-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.mix-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 4px;
+  font-size: 13px;
+}
+.mix-row:first-child {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  height: 42px;
+}
+.mix-badge {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mix-name {
+  flex: 0 0 130px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mix-row .slider {
+  min-width: 0;
+}
+.mix-row.muted .slider,
+.mix-row.muted .vol-pct,
+.mix-row.muted .mix-name {
+  opacity: 0.4;
+}
+.mix-row.muted .icon-btn {
+  color: var(--fg);
+}
+
+/* Screenshot: two ways to take one, then the latest few. */
+.shot-modes {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.shot-mode {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+.shot-mode:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.shot-mode span {
+  display: flex;
+  flex-direction: column;
+}
+.shot-mode b {
+  font-size: 13px;
+}
+.shot-mode small {
+  font-size: 11px;
+  color: var(--dim);
+}
+.shots {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.shot {
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+.shot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.2s ease;
+}
+.shot:hover img {
+  transform: scale(1.05);
+}
+
+/* to do: an add box, then the list (ticked ones sink and dim), then a count */
+.todo-add {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 4px 0 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--dim);
+  cursor: text;
+}
+.todo-add:focus-within {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.todo-add input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+.todo-add input::placeholder {
+  color: var(--dim);
+}
+.todo-enter {
+  padding: 3px 10px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #000;
+  font-size: 11px;
+  font-weight: 600;
+}
+.todo-enter:hover {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+.todo-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.todo-row {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.todo-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.todo-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 6px 32px 6px 8px;
+  border-radius: 10px;
+  text-align: left;
+}
+.todo-main:hover {
+  background: none;
+}
+.todo-box {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--dim);
+  border-radius: 50%;
+  color: #000;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.todo-main:hover .todo-box {
+  border-color: var(--accent);
+}
+.todo-row.done .todo-box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.todo-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.todo-row.done .todo-text {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+.todo-row:hover .recent-x,
+.todo-row .recent-x:focus-visible {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .todo-box {
+    transition: none;
+  }
 }

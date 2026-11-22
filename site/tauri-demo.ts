@@ -11,6 +11,7 @@ export async function listen(name: string, f: Handler) {
   return () => handlers.set(name, (handlers.get(name) ?? []).filter((g) => g !== f));
 }
 export const getCurrentWebview = () => ({ onDragDropEvent: async () => () => {} });
+export const getVersion = async () => "0.1.4"; // @tauri-apps/api/app
 
 const SONGS = [
   {
@@ -38,6 +39,7 @@ let shuffle = false;
 let repeat: "none" | "list" | "track" = "none";
 let rev = 1;
 let volume = 0.62;
+let muted = false;
 const tools = { dark: true, mic_muted: false, awake: false };
 
 const now = () => (playing ? Math.min(SONGS[i].ms, pos + Date.now() - at) : pos);
@@ -126,15 +128,20 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
       return null;
     }
     case "media_art":
+    case "clip_image": // the demo's one copied image is the album cover
       return cover(SONGS[i].colors);
     case "lyrics":
       return lrc(SONGS.find((s) => s.title === args.title)?.lines ?? []);
     case "equalizer":
       return equalizer(!!args.on, Number(args.fps) || 30);
     case "volume":
-      return volume;
+      return [volume, muted];
     case "set_volume":
       volume = Number(args.level);
+      muted = volume <= 0;
+      return null;
+    case "set_muted":
+      muted = !!args.on;
       return null;
     case "tools_state":
       return { ...tools };
@@ -151,13 +158,31 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
       return ics();
     case "agents":
       return {
-        sessions: [{ agent: "claude", title: "Make the island follow the mouse", project: "pulo", working: true, since: Date.now() - 260_000, last: Date.now(), model: "opus" }],
+        sessions: [{ agent: "claude", title: "Make the island follow the mouse", project: "pulo", working: true, since: Date.now() - 260_000, last: Date.now(), model: "opus" },
+          { agent: "claude", title: "Write the release notes", project: "pulo", working: false, since: Date.now() - 3_600_000, last: Date.now() - 1_500_000, model: "claude-sonnet-5-5" },
+        ],
         tokens_today: 184_200,
       };
     case "devices":
       return [{ name: "Buds", percent: 64, kind: "headphones" }, { name: "Mouse", percent: 41, kind: "mouse" }];
     case "get_settings":
       return { calendar_url: "demo", lyrics: true, off: [], ui: {} };
+    case "clip_history":
+      return [
+        { id: "1", text: "https://github.com/PatriusCastro/pulo", image: false, at: Date.now() - 40_000 },
+        { id: "2", text: "Meet at 10:30 in the small room, bring the slides", image: false, at: Date.now() - 600_000 },
+        { id: "3", text: null, image: true, at: Date.now() - 3_000_000 },
+        { id: "4", text: "npm run tauri build", image: false, at: Date.now() - 7_200_000 },
+      ];
+    case "app_volumes":
+      return [
+        { name: "Spotify", level: 0.8, muted: false },
+        { name: "Google Chrome", level: 0.5, muted: false },
+        { name: "Discord", level: 1, muted: true },
+        { name: "System sounds", level: 0.6, muted: false },
+      ];
+    case "screenshots":
+      return [];
     case "hotkey_ok":
       return true;
     default:

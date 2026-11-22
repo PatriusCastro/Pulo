@@ -1,10 +1,15 @@
 :root {
-  --bg: #f7f7f8;
+  --bg: #f3f3f5;
+  --card: #ffffff;
+  --line: #e6e6ea;
   --fg: #1b1b1f;
   --dim: #5f5f6b;
   --field: #ffffff;
   --border: #d4d4da;
+  --hover: rgba(0, 0, 0, 0.04);
+  --track: #c6c6cf;
   --accent: #128a4c;
+  --on-accent: #ffffff;
   --error: #b42318;
   color-scheme: light;
 }
@@ -12,11 +17,16 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1c1c1f;
+    --card: #26262a;
+    --line: #333338;
     --fg: #f2f2f4;
     --dim: #a3a3ad;
-    --field: #2a2a2e;
+    --field: #1f1f23;
     --border: #3d3d43;
+    --hover: rgba(255, 255, 255, 0.04);
+    --track: #55555e;
     --accent: #3ddc84;
+    --on-accent: #08130c;
     --error: #ff8a80;
     color-scheme: dark;
   }
@@ -29,105 +39,126 @@ body {
   font: 14px "Segoe UI Variable", "Segoe UI", sans-serif;
 }
 
-.settings {
-  padding: 20px 24px;
-}
-
-h1 {
-  font-size: 20px;
-  font-weight: 600;
-  margin: 0 0 18px;
-}
-
-label {
-  font-weight: 600;
-}
-
-.row {
+/* Settings: pages in a sidebar on the left (as in Windows 11 Settings), the chosen one on the
+   right. Searching narrows the sidebar. */
+.shell {
+  height: 100vh;
   display: flex;
-  gap: 8px;
-  margin-top: 6px;
 }
-
-input[type="url"] {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--field);
-  color: var(--fg);
-  font: inherit;
+.nav {
+  flex: none;
+  width: 244px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  overflow-y: auto;
 }
-
-input:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-button {
-  padding: 7px 16px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
+.nav-head {
+  padding: 2px 12px 12px;
+  font-size: 13px;
   font-weight: 600;
 }
-
-button:disabled {
-  opacity: 0.6;
-}
-
-.status {
-  min-height: 20px;
-  margin: 8px 0 4px;
-  color: var(--accent);
-}
-
-.status.error,
-.warn {
-  color: var(--error);
-}
-
-.help {
-  margin: 0 0 20px;
-  color: var(--dim);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.check {
+.search {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 400;
+  height: 34px;
+  margin: 0 2px 10px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-bottom-color: var(--dim);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--dim);
 }
-
-.check + .check {
-  margin-top: 12px;
+.search:focus-within {
+  border-bottom: 2px solid var(--accent);
 }
-
-.help.indent {
-  margin: 4px 0 0 24px;
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
 }
-
-.check input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
 }
-
-section {
-  padding: 14px 0 18px;
-  border-top: 1px solid var(--border);
+.nav-item svg {
+  color: var(--dim);
 }
-
-h2 {
-  font-size: 15px;
+.nav-item:hover {
+  background: var(--hover);
+}
+.nav-item.on {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
   font-weight: 600;
-  margin: 0 0 10px;
+}
+.nav-item.on svg {
+  color: var(--accent);
+}
+/* The accent pill beside the current page. */
+.nav-item.on::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.nav-none {
+  padding: 8px 12px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 36px 36px 16px;
+  animation: pane-in 0.18s ease-out;
+}
+.pane > * {
+  flex: none; /* the pane scrolls; its cards keep their height */
+  max-width: 680px;
+}
+.pane h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+}
+.pane .help {
+  margin: 0 2px;
+}
+@keyframes pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Cards: each row what it is on the left and its control on the right. */
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 4px 6px;
 }
 
 h3 {
@@ -137,38 +168,243 @@ h3 {
   margin: 0 0 6px;
 }
 
-.check.indent {
-  margin: 6px 0 0 24px;
+.help {
+  margin: -2px 4px 10px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-.help.indent2 {
-  margin: 4px 0 0 48px;
-}
-
-/* Features list: each switch with its help line under it. */
-section > div + div {
-  margin-top: 10px;
-}
-
-fieldset.radio {
-  margin: 14px 0 0;
+.card {
+  margin: 0;
   padding: 0;
-  border: 0;
+  list-style: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.card.pad {
+  padding: 14px 16px 6px;
 }
 
-legend {
-  font-weight: 600;
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+}
+.item + .item {
+  border-top: 1px solid var(--line);
+}
+label.item:hover {
+  background: var(--hover);
+}
+.item.sub {
+  padding-left: 40px;
+}
+.item.disabled {
+  opacity: 0.5;
+}
+.item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.item-label {
+  font-weight: 400;
+}
+.item-help {
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.warn,
+.status.error {
+  color: var(--error);
+}
+
+/* Visually hidden, still a real input for the keyboard and screen readers. */
+.sr {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* On/off switch: a styled checkbox (role="switch"), knob drawn as a gradient. */
+.switch {
+  flex: none;
+  appearance: none;
+  width: 40px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  border: 1px solid var(--dim);
+  background: radial-gradient(circle 6px at 10px 50%, var(--dim) 5.5px, transparent 6px) no-repeat;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+.switch:checked {
+  border-color: var(--accent);
+  background: radial-gradient(circle 7px at 29px 50%, var(--on-accent) 6.5px, transparent 7px) no-repeat, var(--accent);
+}
+.switch:disabled {
+  opacity: 0.6;
+}
+
+input:focus-visible,
+button:focus-visible,
+select:focus-visible,
+.look:has(input:focus-visible),
+.seg label:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Look: three cards, each with a little drawing of the screen's top edge and the island. */
+.looks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
   margin-bottom: 8px;
+}
+.look {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.look:hover {
+  border-color: var(--border);
+}
+.look.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.look .item-label {
+  font-weight: 600;
+  margin-top: 6px;
+}
+.look-art {
+  position: relative;
+  height: 72px;
+  border-radius: 5px;
+  background: linear-gradient(160deg, #3a6186, #89253e);
+  overflow: hidden;
+}
+.look-art > span {
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  transform: translateX(-50%);
+  width: 72px;
+  height: 18px;
+  border-radius: 9px;
+  background: #000;
+}
+.look-art.notch > span {
+  top: 0;
+  height: 20px;
+  border-radius: 0 0 9px 9px;
+}
+.look-art.bubble > span {
+  width: 18px;
+}
+
+/* Two choices side by side. */
+.seg {
+  flex: none;
+  display: flex;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.seg label {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.seg label.on {
+  background: var(--card);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+input[type="range"] {
+  flex: none;
+  width: 160px;
+  accent-color: var(--accent);
+}
+
+button {
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+}
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+button.ghost {
+  display: inline-flex;
+  padding: 6px;
+  border-color: transparent;
+  background: none;
+  color: var(--dim);
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+button:disabled {
+  opacity: 0.35;
+}
+
+/* Tab order: position number, name, then up and down. */
+.order .item {
+  gap: 6px;
+  min-height: 40px;
+  padding-block: 4px;
+}
+.order .item-label {
+  flex: 1;
+}
+.order-n {
+  width: 18px;
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  padding: 12px 16px 8px;
 }
 
 select,
-input[type="number"] {
+input[type="number"],
+input[type="url"] {
   padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -176,64 +412,181 @@ input[type="number"] {
   color: var(--fg);
   font: inherit;
 }
-
 select {
   display: block;
   width: 100%;
   margin-bottom: 6px;
 }
 
-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+/* Focus timer: the number right-aligned with its unit after it. */
+.unit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.unit input {
+  width: 64px;
+  text-align: right;
 }
 
-.fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px 16px;
-  margin-bottom: 14px;
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+input[type="url"] {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+}
+.status {
+  min-height: 18px;
+  margin: 8px 0 4px;
+  color: var(--accent);
 }
 
-.field {
+@media (prefers-reduced-motion: reduce) {
+  .switch {
+    transition: none;
+  }
+  .pane {
+    animation: none;
+  }
+}
+
+/* scratchpad window: a toolbar, the note as a page, a footer with the word count */
+.pad {
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-weight: 400;
-  font-size: 13px;
+  background: var(--bg);
 }
-
-.field input {
-  width: 80px;
+.pad-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--card);
 }
-.field.gap {
-  margin-top: 12px;
+.pad-group {
+  display: contents;
 }
-.field.gap input {
-  width: 240px;
+.pad-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line);
 }
-
-/* scratchpad window */
-.scratch {
-  height: 100vh;
-  box-sizing: border-box;
-  padding: 12px;
+.pad-btn {
+  display: inline-flex;
+  padding: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
 }
-
-.scratch textarea {
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--field);
+.pad-btn:hover {
+  background: var(--hover);
   color: var(--fg);
-  font: 14px/1.5 "Cascadia Mono", Consolas, monospace;
-  resize: none;
 }
-
-.scratch textarea:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.pad-btn.on {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+.pad-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 5px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pad-save:hover {
+  border-color: var(--accent);
+}
+.pad-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.pad-editor {
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 16px 20px 40px;
+  font-size: 14px;
+  line-height: 1.6;
+  outline: none;
+  overflow-wrap: break-word;
+}
+.pad-editor.empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  color: var(--dim);
+  pointer-events: none;
+}
+.pad-editor h2 {
+  margin: 14px 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.pad-editor h2:first-child {
+  margin-top: 0;
+}
+.pad-editor ul,
+.pad-editor ol {
+  margin: 4px 0;
+  padding-left: 24px;
+}
+.pad-editor li {
+  padding-left: 2px;
+}
+/* Checklist: a box drawn before each item; clicking it ticks the item (Scratchpad.tsx). */
+.pad-editor ul.checks {
+  list-style: none;
+  padding-left: 2px;
+}
+.pad-editor ul.checks > li {
+  position: relative;
+  padding-left: 26px;
+}
+.pad-editor ul.checks > li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.3em;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--dim);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.pad-editor ul.checks > li.done::before {
+  border-color: var(--accent);
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z' fill='white'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.pad-editor ul.checks > li.done {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+.pad-foot {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12px;
+}
+.pad-foot [role="status"] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

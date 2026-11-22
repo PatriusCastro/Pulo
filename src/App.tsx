@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { occurrences, parseIcs, type Raw } from "./ics";
 import { parseLrc, type Line } from "./lyrics";
 import { Equalizer, LyricsPanel, Pet, Progress, useLyricIndex, type Mood } from "./extras";
 import * as P from "./pomodoro";
-import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, type Settings } from "./prefs";
+import { ICONS, Icon } from "./icons";
+import { ToolPage, isTool, type ToolId } from "./IslandTools";
+import { TodoTab } from "./Todo";
+import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, TAB_LABEL, type Settings, type Tab } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./island.css";
@@ -41,67 +44,22 @@ type Hud = {
 /** rest: the small pill. peek: hovering, a wider pill with the live thing and its controls.
  *  open: clicked, the full panel. */
 type Mode = "rest" | "peek" | "open";
-type Tab = "now" | "recent" | "focus" | "agents" | "tools";
 
-// Must match .pill, .pill.peek and .pill.open in island.css (MAX in lib.rs is the open
-// pill plus the shortcut columns).
+// Must match .pill, .bubble .pill.rest, .pill.peek and .pill.open in island.css (MAX in
+// lib.rs is the open pill plus the shortcut columns; resting() there knows rest sizes).
 const COLLAPSED = { w: 200, h: 36 };
+const BUBBLE = { w: 36, h: 36 };
 const PEEK = { w: 360, h: 36 };
 const EXPANDED = { w: 420, h: 268 };
-const sizeOf = (m: Mode) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : COLLAPSED);
+const sizeOf = (m: Mode, bubble: boolean) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : bubble ? BUBBLE : COLLAPSED);
 /** Hover this long before peeking, so passing over the top edge on the way to a tab doesn't. */
 const PEEK_DELAY = 120;
+/** A tucked pill sliding out: about its transform transition (.tucked in island.css). */
+const REVEAL = 480;
 const PRESETS = [1, 5, 15, 25];
-const TAB_LABEL: Record<Tab, string> = { now: "Now", recent: "Recent", focus: "Focus", agents: "Agents", tools: "Tools" };
 const RECENT_MAX = 20;
 const NO_LINES: Line[] = [];
 
-const ICONS = {
-  prev: "M6 6h2v12H6zm3.5 6 8.5 6V6z",
-  next: "M16 6h2v12h-2zm-10 12 8.5-6L6 6z",
-  play: "M8 5v14l11-7z",
-  pause: "M6 5h4v14H6zm8 0h4v14h-4z",
-  music: "M12 3v10.6A4 4 0 1 0 14 17V7h4V3z",
-  back: "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z",
-  shuffle: "M10.6 9.2 5.4 4 4 5.4l5.2 5.2zM14.5 4l2 2L4 18.6 5.4 20 18 7.5l2 2V4zm.3 9.4-1.4 1.4 3.1 3.1-2 2H20v-5.5l-2 2z",
-  repeat: "M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z",
-  repeatOne: "M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2zm-4-2V9h-1l-2 1v1h1.5v4z",
-  lyrics: "M4 5h16v2H4zm0 4h16v2H4zm0 4h10v2H4zm0 4h7v2H4zm14-4v4.3a2 2 0 1 0 2 1.7V15h2v-2z",
-  reset: "M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z",
-  volume: "M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4",
-  mute: "M3 9v6h4l5 5V4L7 9zm16.6 3 2.1-2.1-1.4-1.4-2.1 2.1-2.1-2.1-1.4 1.4 2.1 2.1-2.1 2.1 1.4 1.4 2.1-2.1 2.1 2.1 1.4-1.4z",
-  brightness:
-    "M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zM11 1h2v3h-2zm0 19h2v3h-2zM1 11h3v2H1zm19 0h3v2h-3zM4.2 5.6l1.4-1.4 2.1 2.1-1.4 1.4zm12.1 12.1 1.4-1.4 2.1 2.1-1.4 1.4zM4.2 18.4l2.1-2.1 1.4 1.4-2.1 2.1zm12.1-12.1 2.1-2.1 1.4 1.4-2.1 2.1z",
-  power: "M11 21h-1l1-7H7.5c-.6 0-.6-.3-.4-.6L13 3h1l-1 7h3.5c.5 0 .6.3.4.6z",
-  battery: "M16 4h-2V2h-4v2H8a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1z",
-  mixer: "M7 3h2v6h2v2H5V9h2zm0 10h2v8H7zm8-10h2v10h2v2h-6v-2h2zm0 14h2v4h-2z",
-  timer:
-    "M15 1H9v2h6zm-4 13h2V8h-2zm8-6.6 1.4-1.4-1.4-1.4-1.4 1.4A9 9 0 1 0 21 13a9 9 0 0 0-2-5.6zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z",
-  shelf: "M20 6h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3z",
-  agent: "M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z",
-  bell: "M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4h-2v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z",
-  download: "M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z",
-  close: "M19 6.4 17.6 5 12 10.6 6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12z",
-  mouse: "M12 2a6 6 0 0 0-6 6v8a6 6 0 0 0 12 0V8a6 6 0 0 0-6-6zm-1 3h2v4h-2z",
-  keyboard: "M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm2 3v2h2V9zm4 0v2h2V9zm4 0v2h2V9zm4 0v2h2V9zM7 13v2h10v-2z",
-  headphones: "M12 3a9 9 0 0 0-9 9v6a3 3 0 0 0 3 3h2v-8H5v-1a7 7 0 0 1 14 0v1h-3v8h2a3 3 0 0 0 3-3v-6a9 9 0 0 0-9-9z",
-  swap: "M16 17.01V10h-2v7.01h-3L15 21l4-3.99zM9 3 5 6.99h3V14h2V6.99h3z",
-  bluetooth: "M11 2h1l6 5.5-4.6 4.5 4.6 4.5-6 5.5h-1v-7.6l-4.3 4.2-1.4-1.4 5.7-5.2-5.7-5.2 1.4-1.4 4.3 4.2zm2 2.5v5l2.7-2.5zm0 10v5l2.7-2.5z",
-  gear: "M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54a7.4 7.4 0 0 0-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.47.47 0 0 0-.12-.61zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z",
-  activity: "M3 11h4.3L10 3.6l4 13.2 2.4-5.8H21v2h-3.3L14 21.4 10 8.2 8.7 13H3z",
-  calculator: "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 3v4h10V5zm0 7v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2zm-8 4v2h2v-2zm4 0v2h2v-2zm4 0v2h2v-2z",
-  screenshot: "M7 3h2v4h8a2 2 0 0 1 2 2v8h3v2h-3v3h-2v-3H9a2 2 0 0 1-2-2V9H4V7h3zm2 6v8h8V9z",
-  clipboard: "M9 2h6a1 1 0 0 1 1 1v1h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2V3a1 1 0 0 1 1-1zm1 2v2h4V4zM8 10v2h8v-2zm0 4v2h6v-2z",
-  folder: "M3 6a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
-  note: "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z",
-  moon: "M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.4 5.4 0 0 1-4.4 2.26 5.4 5.4 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z",
-  mic: "M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5.3-3a5.3 5.3 0 0 1-10.6 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z",
-  micOff:
-    "M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23A6.9 6.9 0 0 0 19 11zm-4.02.17c0-.06.02-.11.02-.17V5a3 3 0 0 0-6 0v.18zM4.27 3 3 4.27l6.01 6.01V11a3 3 0 0 0 3 3c.22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52A5.3 5.3 0 0 1 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28a6.9 6.9 0 0 0 2.54-.9L19.73 21 21 19.73z",
-  coffee: "M2 21h18v-2H2zM20 8h-2V5h2zm0-5H4v10a4 4 0 0 0 4 4h6a4 4 0 0 0 4-4v-3h2a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z",
-  lock: "M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zM9 6a3 3 0 0 1 6 0v2H9zm3 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4z",
-  trash: "M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z",
-};
 const DEVICE_ICON: Record<string, string> = { mouse: ICONS.mouse, keyboard: ICONS.keyboard, headphones: ICONS.headphones };
 const SHORTCUT_ICON: Record<string, string> = {
   settings: ICONS.gear,
@@ -122,11 +80,6 @@ const HUD_ICON: Partial<Record<Hud["kind"], string>> = {
   device: ICONS.bluetooth,
 };
 
-const Icon = ({ d, size = 16 }: { d: string; size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d={d} fillRule="evenodd" />
-  </svg>
-);
 
 /** Text that scrolls when it doesn't fit: one pass, a pause, again. Not a running CSS
  *  animation, which keeps the island repainting (and costs CPU) even while it's paused. */
@@ -287,6 +240,10 @@ export default function App() {
   const [art, setArt] = useState<string | null>(null);
   const [tint, setTint] = useState<string | null>(null); // cover colour, behind the music page
   const [hud, setHud] = useState<Hud | null>(null);
+  // The bubble widens to the plain pill while a HUD (volume, power) needs the room.
+  const bubble = settings.style === "bubble" && !hud;
+  const bubbleRef = useRef(bubble);
+  bubbleRef.current = bubble;
   const [timerEnd, setTimerEnd] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const leave = useRef<number | undefined>(undefined);
@@ -304,10 +261,14 @@ export default function App() {
   const [lyrics, setLyrics] = useState<Line[]>([]);
   // Music page (the music button in Now): full player with seek, shuffle, repeat, volume, lyrics.
   const [musicPage, setMusicPage] = useState(false);
+  const [tool, setTool] = useState<ToolId | null>(null); // a shortcut's page (IslandTools), over the tabs
   const [showLyrics, setShowLyrics] = useState(() => load("showLyrics", true));
   const [volume, setVolume] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const draggingVolume = useRef(false); // Windows echoes each change back; don't let it tug the knob
   const lyricsCache = useRef(new Map<string, Line[]>());
   const [away, setAway] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false); // a fullscreen video or browser: tuck
   const [cheerUntil, setCheerUntil] = useState(0);
   const cheer = () => setCheerUntil(Date.now() + 12_000);
   const [tab, setTab] = useState<Tab>(() => load("tab", "now"));
@@ -326,6 +287,12 @@ export default function App() {
     setRecent([]);
     save("recent", []);
   };
+  const removeRecent = (at: number) =>
+    setRecent((cur) => {
+      const next = cur.filter((r) => r.at !== at);
+      save("recent", next);
+      return next;
+    });
 
   const showHud = (h: Hud, ms = 1600) => {
     setHud(h);
@@ -337,17 +304,33 @@ export default function App() {
 
   // What the window region currently allows; it must cover the pill before the pill grows
   // into it, and shrinks only once the pill has finished shrinking.
-  const region = useRef({ ...COLLAPSED, open: false });
+  const region = useRef({ ...COLLAPSED, open: false, out: false });
   const intent = useRef<Mode>("rest");
+  // Tucked (auto-hide, or a fullscreen video): at rest the pill hides in the top edge until
+  // the mouse comes near, then comes out small; staying on it peeks as usual.
+  const tucked = !!settings.auto_hide || fullscreen;
+  const [out, setOut] = useState(false);
+  const outRef = useRef(out);
   const setRegion = (s: { w: number; h: number }, open: boolean) => {
-    region.current = { ...s, open };
+    region.current = { ...s, open, out: outRef.current };
     const p = prefsRef.current;
-    return invoke("resize", { w: s.w, h: s.h, left: open ? p.left.length : 0, right: open ? p.right.length : 0 });
+    return invoke("resize", { w: s.w, h: s.h, left: open ? p.left.length : 0, right: open ? p.right.length : 0, out: outRef.current });
+  };
+  const comeOut = (on: boolean) => {
+    outRef.current = on;
+    if (on) setRegion(sizeOf("rest", bubbleRef.current), false).then(() => outRef.current && setOut(true));
+    else {
+      setOut(false); // the region follows once it has slid away (onTransitionEnd)
+      // Left before it came out, so no transition ends: shrink the region anyway.
+      window.setTimeout(() => {
+        if (!outRef.current && region.current.out && intent.current === "rest") setRegion(sizeOf("rest", bubbleRef.current), false);
+      }, REVEAL);
+    }
   };
   function go(next: Mode) {
     intent.current = next;
     clearTimeout(hoverTimer.current);
-    const t = sizeOf(next);
+    const t = sizeOf(next, bubbleRef.current);
     const r = region.current;
     if (t.w > r.w || t.h > r.h || (next === "open" && !r.open)) {
       // Only if nothing else was asked for while the region grew (the mouse may have left).
@@ -356,26 +339,49 @@ export default function App() {
   }
   function collapseSoon(ms: number) {
     clearTimeout(leave.current);
-    leave.current = window.setTimeout(() => go("rest"), ms);
+    leave.current = window.setTimeout(() => {
+      go("rest");
+      if (outRef.current) comeOut(false);
+    }, ms);
   }
   const onEnter = () => {
+    hovering.current = true;
     clearTimeout(leave.current);
     if (intent.current !== "rest") return;
-    if (prefs.openOn === "hover") return go("open");
+    // Tucked away: come out first, and only peek (or open) if the mouse stays once it's out.
+    const hidden = tucked && !outRef.current;
+    if (hidden) comeOut(true);
+    if (prefs.openOn === "hover" && !hidden) return go("open");
     clearTimeout(hoverTimer.current);
-    hoverTimer.current = window.setTimeout(() => go("peek"), PEEK_DELAY);
+    const next = prefs.openOn === "hover" ? "open" : "peek";
+    hoverTimer.current = window.setTimeout(() => go(next), hidden ? REVEAL + PEEK_DELAY : PEEK_DELAY);
+  };
+  const menuOpen = useRef(false); // the right-click menu is showing
+  const typing = useRef(false); // typing a to-do: stay open even if the mouse wanders off
+  const hovering = useRef(false);
+  const onTyping = (on: boolean) => {
+    typing.current = on;
+    if (!on && !hovering.current) collapseSoon(400);
   };
   const onLeave = () => {
+    hovering.current = false;
+    if (menuOpen.current || typing.current) return;
     clearTimeout(hoverTimer.current);
     collapseSoon(intent.current === "open" ? 400 : 150);
   };
   // Shrinking: the region follows once the pill's size transition ends.
   const onTransitionEnd = (e: React.TransitionEvent) => {
-    if (e.target !== e.currentTarget || (e.propertyName !== "width" && e.propertyName !== "height")) return;
-    const t = sizeOf(mode);
+    if (e.target !== e.currentTarget || !["width", "height", "transform"].includes(e.propertyName)) return;
+    const t = sizeOf(mode, bubble);
     const r = region.current;
-    if (t.w !== r.w || t.h !== r.h || r.open !== (mode === "open")) setRegion(t, mode === "open");
+    if (t.w !== r.w || t.h !== r.h || r.open !== (mode === "open") || r.out !== outRef.current) setRegion(t, mode === "open");
   };
+  // The resting bubble widening (a HUD, or the style changed in Settings): grow the region
+  // with it. Shrinking is left to onTransitionEnd.
+  useEffect(() => {
+    if (mode === "rest" && !bubble && region.current.w < COLLAPSED.w) setRegion(COLLAPSED, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the bubble changes
+  }, [bubble]);
 
   // ---------- data from Rust ----------
 
@@ -396,6 +402,11 @@ export default function App() {
       listen<[Hud["kind"], number, boolean]>("hud", (e) => {
         const [kind, level, flag] = e.payload;
         showHud({ kind, level, flag });
+        // Volume keys and the Windows flyout move the music page's slider too.
+        if (kind === "volume" && !draggingVolume.current) {
+          setVolume(level);
+          setMuted(flag);
+        }
       }),
       listen<string>("calendar", (e) => setEvents(parseIcs(e.payload))),
       listen<Agents>("agents", (e) => setAgents(e.payload)),
@@ -415,6 +426,7 @@ export default function App() {
         collapseSoon(4000);
       }),
       listen<boolean>("away", (e) => setAway(e.payload)),
+      listen<boolean>("tucked", (e) => setFullscreen(e.payload)),
       // Click-through mode (watch_click_through in lib.rs; it also fades the window): treat
       // clicks starting to pass through as the mouse leaving.
       listen<boolean>("passthrough", (e) => e.payload && onLeave()),
@@ -592,6 +604,7 @@ export default function App() {
   const pomoPause = () => setPomo((p) => P.pause(p, Date.now()));
   const pomoSkip = () => setPomo((p) => P.advance(p, cfg, Date.now(), false));
   const pomoReset = () => setPomo((p) => P.reset(p, cfg, Date.now()));
+  const pomoJump = (ph: P.Phase, round: number) => setPomo((p) => P.jump(p, ph, round, cfg));
   const focusOn = has("focus");
   const pomoRunning = focusOn && pomo.end !== null;
   const pomoLeft = P.remaining(pomo, now);
@@ -608,6 +621,9 @@ export default function App() {
   const clock = hm(now);
   const playing = optimistic ?? !!media?.playing;
   const isOpen = mode === "open";
+  useEffect(() => {
+    if (mode === "rest") setTool(null); // a shortcut's page lasts until the island closes
+  }, [mode]);
   // Synced lyrics show on the music page only; follow the song only while they're on screen.
   const lyricsShown = isOpen && musicPage && showLyrics && lyrics.length > 0;
   const li = useLyricIndex(lyricsShown ? lyrics : NO_LINES, media?.position_ms ?? 0, media?.position_at ?? 0, playing);
@@ -635,21 +651,21 @@ export default function App() {
 
   // Speaker volume for the music page slider: read when the page opens.
   useEffect(() => {
-    if (isOpen && musicPage) invoke<number>("volume").then(setVolume);
-  }, [isOpen, musicPage]);
+    // On opening, so it's right before the music page shows rather than jumping from 0.
+    if (isOpen)
+      invoke<[number, boolean]>("volume").then(([l, m]) => {
+        setVolume(l);
+        setMuted(m);
+      });
+  }, [isOpen]);
   // Shortcuts changed in Settings while open: the region needs the new button count.
   useEffect(() => {
     if (mode === "open") setRegion(EXPANDED, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the counts change
   }, [prefs.left.length, prefs.right.length]);
 
-  const tabs: Tab[] = [
-    "now",
-    "recent",
-    ...(focusOn ? ["focus" as const] : []),
-    ...(agentsOn ? ["agents" as const] : []),
-    ...(toolsOn ? ["tools" as const] : []),
-  ];
+  const tabOn: Record<Tab, boolean> = { now: true, recent: true, focus: focusOn, agents: agentsOn, todo: has("todo"), tools: toolsOn };
+  const tabs = prefs.tabs.filter((t) => tabOn[t]); // in the order chosen in Settings
   const shown: Tab = tabs.includes(tab) ? tab : "now";
   // System stats: sampled only while someone is looking at them.
   const statsVisible = mode === "open" && (shown === "tools" || (shown === "now" && !musicPage));
@@ -716,11 +732,11 @@ export default function App() {
       {items.map((target) => (
         <button
           key={target}
-          className="shortcut"
+          className={`shortcut${tool === target ? " on" : ""}`}
           aria-label={SHORTCUTS[target]}
           title={SHORTCUTS[target]}
           tabIndex={isOpen ? 0 : -1}
-          onClick={() => invoke("launch", { target })}
+          onClick={() => (isTool(target) ? setTool(tool === target ? null : target) : invoke("launch", { target }))}
         >
           <Icon d={SHORTCUT_ICON[target]} size={18} />
         </button>
@@ -780,6 +796,32 @@ export default function App() {
       <Icon d={ICONS.lyrics} size={16} />
     </button>
   );
+  // Volume as Windows keeps it: a level, and muted on top of it (muting doesn't lose the level).
+  const changeVolume = (v: number) => {
+    const level = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
+    setVolume(level);
+    setMuted(level <= 0); // set_volume unmutes when turned up, mutes at 0
+    invoke("set_volume", { level });
+  };
+  const toggleMute = () => {
+    if (muted && volume <= 0) return changeVolume(0.3); // nothing to go back to
+    setMuted(!muted);
+    invoke("set_muted", { on: !muted });
+  };
+  const shuffleBtn = media && media.shuffle !== null && (
+    <button className={`icon-btn${media.shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={media.shuffle} onClick={() => invoke("media", { action: "shuffle" })}>
+      <Icon d={ICONS.shuffle} size={16} />
+    </button>
+  );
+  const repeatBtn = media && media.repeat !== null && (
+    <button
+      className={`icon-btn${media.repeat !== "none" ? " on" : ""}`}
+      aria-label={`Repeat: ${media.repeat === "track" ? "this song" : media.repeat === "list" ? "all" : "off"}`}
+      onClick={() => invoke("media", { action: "repeat" })}
+    >
+      <Icon d={media.repeat === "track" ? ICONS.repeatOne : ICONS.repeat} size={16} />
+    </button>
+  );
   // Lyrics on: they take the panel, with the player shrunk to one row above them.
   const lyricsMode = lyricsOn && showLyrics;
   const musicEl = media && (
@@ -788,8 +830,8 @@ export default function App() {
         <button className="icon-btn" aria-label="Back" onClick={() => setMusicPage(false)}>
           <Icon d={ICONS.back} size={16} />
         </button>
-        {art ? <img className="art small" src={art} alt="" /> : <div className="art small empty"><Icon d={ICONS.music} size={18} /></div>}
-        <div className="meta">
+        {art ? <img className="art small" src={art} alt="" key={art} /> : <div className="art small empty"><Icon d={ICONS.music} size={18} /></div>}
+        <div className="meta song" key={media.title}>
           <Marquee className="title">{media.title || "Unknown title"}</Marquee>
           <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
         </div>
@@ -805,35 +847,32 @@ export default function App() {
         )
       ) : (
       <div className="music-row">
-        {media.shuffle !== null && (
-          <button className={`icon-btn${media.shuffle ? " on" : ""}`} aria-label="Shuffle" aria-pressed={media.shuffle} onClick={() => invoke("media", { action: "shuffle" })}>
-            <Icon d={ICONS.shuffle} size={16} />
+        {shuffleBtn}
+        {repeatBtn}
+        {/* Volume: the speaker mutes and unmutes, the wheel nudges it, the number says where it is. */}
+        <div className={`volume-row${muted ? " muted" : ""}`} title="Scroll to change the volume" onWheel={(e) => changeVolume(volume + (e.deltaY < 0 ? 0.02 : -0.02))}>
+          <button className="icon-btn" aria-label={muted ? "Unmute" : "Mute"} aria-pressed={muted} title={muted ? "Unmute" : "Mute"} onClick={toggleMute}>
+            <Icon d={muted || volume <= 0 ? ICONS.mute : volume < 0.5 ? ICONS.volume : ICONS.volumeHigh} size={16} />
           </button>
-        )}
-        {media.repeat !== null && (
-          <button
-            className={`icon-btn${media.repeat !== "none" ? " on" : ""}`}
-            aria-label={`Repeat: ${media.repeat === "track" ? "this song" : media.repeat === "list" ? "all" : "off"}`}
-            onClick={() => invoke("media", { action: "repeat" })}
-          >
-            <Icon d={media.repeat === "track" ? ICONS.repeatOne : ICONS.repeat} size={16} />
-          </button>
-        )}
-        <Icon d={volume > 0 ? ICONS.volume : ICONS.mute} size={16} />
-        <input
-          type="range"
-          className="slider volume"
-          min={0}
-          max={1}
-          step={0.02}
-          value={volume}
-          aria-label="Volume"
-          style={{ "--pct": `${volume * 100}%` } as React.CSSProperties}
-          onChange={(e) => {
-            setVolume(+e.target.value);
-            invoke("set_volume", { level: +e.target.value });
-          }}
-        />
+          <input
+            type="range"
+            className="slider volume"
+            min={0}
+            max={1}
+            step={0.02}
+            value={volume}
+            aria-label="Volume"
+            aria-valuetext={muted ? "Muted" : `${Math.round(volume * 100)}%`}
+            style={{ "--pct": `${volume * 100}%` } as React.CSSProperties}
+            onPointerDown={() => (draggingVolume.current = true)}
+            onPointerUp={() => (draggingVolume.current = false)}
+            onPointerCancel={() => (draggingVolume.current = false)}
+            onChange={(e) => changeVolume(+e.target.value)}
+          />
+          <span className="vol-pct mono" aria-hidden="true">
+            {Math.round(volume * 100)}
+          </span>
+        </div>
         {lyricsBtn}
       </div>
       )}
@@ -842,26 +881,50 @@ export default function App() {
   // The music page has the whole panel: no tabs (Back returns), the cover's colour behind it.
   const musicOpen = isOpen && shown === "now" && musicPage && !!media;
 
+  // Changing pages: the new one slides in from the side it's on (tabs to the right come from
+  // the right; the music page is deeper than Now, so it comes from the right and Back
+  // returns from the left). Keying the tab body on the page replays a one-shot animation.
+  const pageKey = tool ? `tool-${tool}` : shown === "now" && musicPage && media ? "music" : shown;
+  const page = useRef<{ key: string; dir: "" | "fwd" | "back" }>({ key: pageKey, dir: "" });
+  if (page.current.key !== pageKey) {
+    const at = (k: string) => (k.startsWith("tool-") ? tabs.length + 1 : k === "music" ? tabs.length : tabs.indexOf(k as Tab));
+    page.current = { key: pageKey, dir: at(pageKey) > at(page.current.key) ? "fwd" : "back" };
+  }
+  // The highlight behind the current tab glides to the next one instead of jumping.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const [ind, setInd] = useState<{ x: number; w: number; slide: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const el = tabsRef.current?.querySelector<HTMLElement>(".tab.on");
+    setInd((p) => (el ? { x: el.offsetLeft, w: el.offsetWidth, slide: !!p } : null));
+  }, [shown, tabs.join(), musicOpen, tool]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const nowTab = musicPage && musicEl ? musicEl : (
     <>
       {media ? (
+        // A card in the cover's colour: the song on top, its position, then the controls centred.
         <div className="player">
           <div className="media">
-            {art ? <img className="art" src={art} alt="" /> : <div className="art empty"><Icon d={ICONS.music} size={28} /></div>}
-            <div className="meta">
-              <Marquee className="title">{media.title || "Unknown title"}</Marquee>
-              <div className="sub-row">
-                <div className="sub">{media.artist}</div>
-                {isOpen && playing && has("equalizer") && <Equalizer />}
-              </div>
-            </div>
-            {transport}
-          </div>
-          <div className="player-row">
-            {progressEl}
-            <button className="icon-btn music-open" aria-label="Music: lyrics, volume, shuffle" title="Lyrics, volume, shuffle" onClick={() => setMusicPage(true)}>
-              <Icon d={ICONS.lyrics} size={16} />
+            {/* The song itself opens the music page, as on a phone; the art sinks a little while paused. */}
+            <button className={`art-btn${playing ? "" : " paused"}`} aria-label="Music: lyrics, volume" tabIndex={isOpen ? 0 : -1} onClick={() => setMusicPage(true)}>
+              {art ? <img className="art" src={art} alt="" key={art} /> : <div className="art empty"><Icon d={ICONS.music} size={24} /></div>}
             </button>
+            <div className="meta song" key={media.title} onClick={() => setMusicPage(true)}>
+              <Marquee className="title">{media.title || "Unknown title"}</Marquee>
+              <div className="sub">{[media.artist, media.album].filter(Boolean).join(" · ")}</div>
+            </div>
+            <div className="player-corner">
+              {isOpen && playing && has("equalizer") && <Equalizer />}
+              <button className="icon-btn" aria-label="Music: lyrics, volume" title="Lyrics and volume" tabIndex={isOpen ? 0 : -1} onClick={() => setMusicPage(true)}>
+                <Icon d={ICONS.lyrics} size={16} />
+              </button>
+            </div>
+          </div>
+          {progressEl}
+          <div className="player-controls">
+            {/* Empty slots keep the transport centred when the player has no shuffle or repeat. */}
+            <span className="slot-btn">{shuffleBtn}</span>
+            {transport}
+            <span className="slot-btn">{repeatBtn}</span>
           </div>
           {snap.other && (
             <button className="also" title={`Show ${snap.other.app} instead`} onClick={() => invoke("media", { action: "swap" })}>
@@ -906,46 +969,59 @@ export default function App() {
     </>
   );
 
-  const RING = 2 * Math.PI * 40;
   const roundNow = Math.min(pomo.phase === "focus" ? pomo.round + 1 : pomo.round, cfg.every);
+  // The cycle as segments sized by length: focus, break, focus, ... long break. `round` is the
+  // focus rounds finished before that segment, which is what P.jump needs to land on it.
+  const cycle = Array.from({ length: cfg.every }, (_, i) => [
+    { phase: "focus" as P.Phase, round: i },
+    { phase: (i === cfg.every - 1 ? "long" : "short") as P.Phase, round: i + 1 },
+  ]).flat();
+  // A break reached by skipping a focus round has round 0; show it after the first focus.
+  const atSeg = Math.min(cycle.length - 1, pomo.phase === "focus" ? pomo.round * 2 : Math.max(1, pomo.round * 2 - 1));
+  const nextPhase = cycle[(atSeg + 1) % cycle.length].phase;
+  const segName = (s: (typeof cycle)[number]) =>
+    s.phase === "focus" ? `Focus, round ${s.round + 1}` : s.phase === "long" ? "Long break" : `Break after round ${s.round}`;
   const focusTab = (
     <>
-      <div className="focus">
-        <div className="ring">
-          <svg width="120" height="120" viewBox="0 0 92 92" aria-hidden="true">
-            <circle cx="46" cy="46" r="40" className="track" />
-            <circle
-              cx="46"
-              cy="46"
-              r="40"
-              className={`progress ${phaseCls}`}
-              strokeDasharray={RING}
-              strokeDashoffset={RING * (pomoLeft / pomoTotal)}
-              transform="rotate(-90 46 46)"
-            />
-          </svg>
-          <span className="ring-time mono">{fmt(pomoLeft)}</span>
+      <div className="pomo">
+        <div className="pomo-head">
+          <span className={phaseCls}>
+            {P.LABEL[pomo.phase]} · Round {roundNow} of {cfg.every}
+          </span>
+          {doneToday > 0 && <span>{doneToday} done today</span>}
         </div>
-        <div className="focus-side">
-          <div className={`phase-label ${phaseCls}`}>{P.LABEL[pomo.phase]}</div>
-          <div className="rounds" role="img" aria-label={`Round ${roundNow} of ${cfg.every}`}>
-            {Array.from({ length: cfg.every }, (_, k) => (
-              <span key={k} className={k < pomo.round ? "done" : k === pomo.round && pomo.phase === "focus" ? "now" : ""} />
-            ))}
-            <span className="sub">{doneToday ? `${doneToday} done today` : `Round ${roundNow} of ${cfg.every}`}</span>
+        <div className="pomo-main">
+          <div>
+            <div className={`pomo-time mono${pomoActive && !pomoRunning ? " paused" : ""}`}>{fmt(pomoLeft)}</div>
+            <div className="pomo-hint">
+              {pomoRunning ? `until ${hm(now + pomoLeft)}` : pomoActive ? "Paused" : `${cfg[pomo.phase]} minutes`} · then {P.LABEL[nextPhase].toLowerCase()}
+            </div>
           </div>
-          <div className="focus-controls">
-            <button className={pomoRunning ? "primary" : `primary go ${phaseCls}`} onClick={pomoRunning ? pomoPause : pomoStart}>
-              <Icon d={pomoRunning ? ICONS.pause : ICONS.play} size={16} />
-              {pomoRunning ? "Pause" : pomoActive ? "Resume" : "Start"}
-            </button>
-            <button aria-label="Skip to the next phase" title="Skip" onClick={pomoSkip}>
-              <Icon d={ICONS.next} size={18} />
-            </button>
-            <button aria-label="Reset" title="Reset" onClick={pomoReset}>
+          <div className="pomo-controls">
+            <button aria-label="Start the cycle over" title="Start the cycle over" onClick={pomoReset}>
               <Icon d={ICONS.reset} size={18} />
             </button>
+            <button className={`pomo-play ${phaseCls}${pomoRunning ? " running" : ""}`} aria-label={pomoRunning ? "Pause" : pomoActive ? "Resume" : "Start"} onClick={pomoRunning ? pomoPause : pomoStart}>
+              <Icon d={pomoRunning ? ICONS.pause : ICONS.play} size={22} />
+            </button>
+            <button aria-label={`Skip to ${P.LABEL[nextPhase].toLowerCase()}`} title={`Skip to ${P.LABEL[nextPhase].toLowerCase()}`} onClick={pomoSkip}>
+              <Icon d={ICONS.next} size={18} />
+            </button>
           </div>
+        </div>
+        {/* Past segments full, the current one filling, the rest empty. Click one to go there. */}
+        <div className="cycle">
+          {cycle.map((s, k) => (
+            <button
+              key={k}
+              className={`seg ${s.phase === "focus" ? "accent" : "break"}${k === atSeg ? " now" : ""}`}
+              style={{ flexGrow: cfg[s.phase], "--fill": `${k < atSeg ? 100 : k > atSeg ? 0 : (1 - pomoLeft / pomoTotal) * 100}%` } as React.CSSProperties}
+              aria-label={`Go to ${segName(s).toLowerCase()}`}
+              aria-current={k === atSeg ? "step" : undefined}
+              title={`${segName(s)} · ${cfg[s.phase]} min`}
+              onClick={() => k !== atSeg && pomoJump(s.phase, s.round)}
+            />
+          ))}
         </div>
       </div>
       <div className="bar">
@@ -959,24 +1035,35 @@ export default function App() {
     <>
       <div className="agent-list">
         {agents.sessions.length ? (
-          agents.sessions.map((s, i) => {
-            const busy = working.includes(s);
-            const meta = [s.title ? s.project : "", shortModel(s.model)].filter(Boolean).join(" · ");
-            return (
-              <div className="agent-row" key={i}>
-                <span className={`dot${busy ? " working" : " idle"}`} aria-label={busy ? "Working" : "Idle"} />
-                <span className="agent-title">{s.title || s.project}</span>
-                <span className="agent-meta">{meta}</span>
-                <span className="agent-time mono">{busy ? fmtDur(now - s.since) : fmtAgo(now - s.last)}</span>
-              </div>
-            );
-          })
+          // Working sessions first, then the most recently active.
+          [...agents.sessions]
+            .sort((a, b) => +working.includes(b) - +working.includes(a) || b.last - a.last)
+            .map((s) => {
+              const busy = working.includes(s);
+              const meta = [s.title ? s.project : "", shortModel(s.model)].filter(Boolean).join(" · ");
+              return (
+                <div className={`agent-card${busy ? " busy" : ""}`} key={`${s.project}${s.since}`}>
+                  <span className={`dot${busy ? " working" : " resting"}`} aria-hidden="true" />
+                  <div className="agent-text">
+                    <div className="agent-title">{s.title || s.project}</div>
+                    <div className="agent-meta">{meta}</div>
+                  </div>
+                  <div className="agent-when">
+                    <span className="agent-state">{busy ? "Working" : "Idle"}</span>
+                    <span className="mono">{busy ? fmtDur(now - s.since) : fmtAgo(now - s.last)}</span>
+                  </div>
+                </div>
+              );
+            })
         ) : (
-          <div className="empty-note">No Claude Code sessions in the last day</div>
+          <div className="empty-note">
+            <Icon d={ICONS.agent} size={22} />
+            No Claude Code sessions in the last day
+          </div>
         )}
       </div>
       <div className="bar">
-        <span className={working.length ? "more" : ""}>{working.length ? `${working.length} working` : "All idle"}</span>
+        <span className={working.length ? "more" : ""}>{working.length ? `${working.length} working` : agents.sessions.length ? "All idle" : ""}</span>
         <span className="mono">{fmtTokens(agents.tokens_today)} tokens today</span>
       </div>
     </>
@@ -1022,27 +1109,53 @@ export default function App() {
     timer: ICONS.timer,
     focus: ICONS.timer,
   };
+  const dayLabel = (t: number) => {
+    const d = new Date(t).toDateString();
+    if (d === new Date(now).toDateString()) return "Today";
+    if (d === new Date(now - 864e5).toDateString()) return "Yesterday";
+    return new Date(t).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
+  };
+  const recentDays = new Set(recent.map((r) => new Date(r.at).toDateString())).size;
   const recentTab = (
     <>
       <div className="recent-list">
         {recent.length ? (
-          recent.map((r, i) =>
-            r.path ? (
-              <button key={i} className="recent-row" title={r.path} onClick={() => invoke("open_path", { path: r.path })}>
-                <Icon d={RECENT_ICON[r.kind]} size={14} />
+          recent.map((r, i) => {
+            // A day heading only once the list spans more than today.
+            const day = dayLabel(r.at);
+            const head = recentDays > 1 && (i === 0 || dayLabel(recent[i - 1].at) !== day);
+            const inner = (
+              <>
+                <span className={`badge k-${r.kind}`}>
+                  <Icon d={RECENT_ICON[r.kind]} size={14} />
+                </span>
                 <span className="recent-text">{r.text}</span>
-                <span className="agent-time">{fmtAgo(now - r.at)}</span>
-              </button>
-            ) : (
-              <div key={i} className="recent-row">
-                <Icon d={RECENT_ICON[r.kind]} size={14} />
-                <span className="recent-text">{r.text}</span>
-                <span className="agent-time">{fmtAgo(now - r.at)}</span>
-              </div>
-            ),
-          )
+              </>
+            );
+            return (
+              <Fragment key={`${r.at}${r.text}`}>
+                {head && <div className="recent-day">{day}</div>}
+                <div className="recent-row">
+                  {r.path ? (
+                    <button className="recent-main" title={`Open ${r.path}`} onClick={() => invoke("open_path", { path: r.path })}>
+                      {inner}
+                    </button>
+                  ) : (
+                    <div className="recent-main">{inner}</div>
+                  )}
+                  <span className="recent-time">{fmtAgo(now - r.at)}</span>
+                  <button className="recent-x" aria-label={`Remove ${r.text}`} title="Remove" onClick={() => removeRecent(r.at)}>
+                    <Icon d={ICONS.close} size={12} />
+                  </button>
+                </div>
+              </Fragment>
+            );
+          })
         ) : (
-          <div className="empty-note">Notifications, downloads and finished timers show up here</div>
+          <div className="empty-note">
+            <Icon d={ICONS.bell} size={22} />
+            Notifications, downloads and finished timers show up here
+          </div>
         )}
       </div>
       <div className="bar">
@@ -1098,10 +1211,29 @@ export default function App() {
 
   return (
     <div
-      className={`island ${mode}`}
+      className={`island ${mode}${settings.style === "notch" ? " notch" : bubble ? " bubble" : ""}${tucked && !out ? " tucked" : ""}`}
+      style={
+        {
+          "--tint": tint ?? undefined, // the notch's ears take it too
+          // Tucked, the window sits on the screen's edge; out, the pill drops to the gap (apply_region).
+          "--drop": tucked && settings.style !== "notch" ? `${settings.top_gap ?? 6}px` : undefined,
+        } as React.CSSProperties
+      }
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // A native menu at the cursor (quick_menu in lib.rs). It takes the mouse, which reads
+        // as leaving: stay as we are until it closes (the call returns then), and collapse
+        // afterwards only if the mouse isn't back on the island.
+        menuOpen.current = true;
+        clearTimeout(leave.current);
+        clearTimeout(hoverTimer.current);
+        invoke("quick_menu").finally(() => {
+          menuOpen.current = false;
+          if (!document.querySelector(".island:hover")) collapseSoon(400);
+        });
+      }}
       // Clicking inside the webview drops the window's transparency (white corners); restore it.
       onPointerDown={() => invoke("refresh_transparency")}
       onPointerUp={() => invoke("refresh_transparency")}
@@ -1109,7 +1241,6 @@ export default function App() {
       {side(prefs.left)}
       <div
         className={`pill ${mode}${musicOpen && tint ? " tinted" : ""}`}
-        style={tint ? ({ "--tint": tint } as React.CSSProperties) : undefined}
         onTransitionEnd={onTransitionEnd}
         onClick={() => {
           if (intent.current !== "open") {
@@ -1138,7 +1269,7 @@ export default function App() {
                 ) : playing && mode === "rest" && has("equalizer") ? (
                   // Live waveform while the pill is at rest (unmounting it stops the capture).
                   // Orange while an agent works, so that signal isn't lost under the music.
-                  <Equalizer className={`wave${working.length ? " working" : ""}`} fps={20} />
+                  <Equalizer className={`wave${working.length ? " working" : ""}`} fps={12} />
                 ) : working.length ? (
                   <span className="dot working" aria-label="Agent working" />
                 ) : playing ? (
@@ -1156,17 +1287,23 @@ export default function App() {
         </div>
 
         <div className="layer panel" aria-hidden={!isOpen}>
-          {tabs.length > 1 && !musicOpen && (
-            <div className="tabs" role="tablist">
+          {tabs.length > 1 && !musicOpen && !tool && (
+            <div className="tabs" role="tablist" ref={tabsRef}>
+              {ind && <span className={`tab-ind${ind.slide ? " slide" : ""}`} style={{ transform: `translateX(${ind.x}px)`, width: ind.w }} aria-hidden="true" />}
               {tabs.map((t) => (
-                <button key={t} role="tab" aria-selected={t === shown} className={`tab${t === shown ? " on" : ""}`} tabIndex={isOpen ? 0 : -1} onClick={() => pickTab(t)}>
+                <button key={t} role="tab" aria-selected={t === shown} className={`tab${t === shown ? " on" : ""}`} tabIndex={isOpen ? 0 : -1} onClick={() => {
+                    setTool(null);
+                    pickTab(t);
+                  }}>
                   {TAB_LABEL[t]}
                 </button>
               ))}
             </div>
           )}
-          <div className="tab-body">
-            {shown === "now"
+          <div className={`tab-body${page.current.dir ? ` page-${page.current.dir}` : ""}`} key={pageKey}>
+            {tool ? (
+              <ToolPage tool={tool} ago={fmtAgo} onBack={() => setTool(null)} onDone={() => collapseSoon(0)} />
+            ) : shown === "now"
               ? nowTab
               : shown === "recent"
                 ? recentTab
@@ -1174,10 +1311,13 @@ export default function App() {
                   ? focusTab
                   : shown === "agents"
                     ? agentsTab
-                    : toolsTab}
+                    : shown === "todo"
+                      ? <TodoTab open={isOpen} onTyping={onTyping} />
+                      : toolsTab}
           </div>
         </div>
       </div>
+      {settings.style === "notch" && <div className={`ears${musicOpen && tint ? " tinted" : ""}`} />}
       {side(prefs.right)}
     </div>
   );

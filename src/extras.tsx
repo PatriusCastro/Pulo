@@ -162,7 +162,7 @@ export function Pet({ mood }: { mood: Mood }) {
   const body = mood === "work" ? "#ff9f43" : "#3ddc84";
   const eyesClosed = mood === "sleep" || blink;
   return (
-    <svg className={`pet ${mood}`} width="24" height="24" viewBox="0 0 24 24" role="img" aria-label={`Pet is ${mood === "idle" ? "awake" : mood === "work" ? "watching an agent" : mood === "sleep" ? "napping" : "happy"}`}>
+    <svg className={`pet ${mood}`} width="24" height="24" viewBox="0 1.5 24 24" role="img" aria-label={`Pet is ${mood === "idle" ? "awake" : mood === "work" ? "watching an agent" : mood === "sleep" ? "napping" : "happy"}`}>
       <path d="M12 9c0-3 2-5 5-5-1 3-2.5 4.5-5 5zm0 0c-.5-2.5-2.5-4-5-4 1 2.5 2.5 3.5 5 4z" fill={body} opacity=".8" />
       <ellipse cx="12" cy="15.5" rx="9" ry="6.5" fill={body} />
       {mood === "happy" ? (

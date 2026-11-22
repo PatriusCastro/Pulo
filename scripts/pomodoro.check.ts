@@ -1,6 +1,6 @@
 // Run: node --experimental-strip-types scripts/pomodoro.check.ts
 import assert from "node:assert/strict";
-import { advance, initial, pause, remaining, reset, resize, start, tick, type Config } from "../src/pomodoro.ts";
+import { advance, initial, pause, remaining, reset, resize, jump, start, tick, type Config } from "../src/pomodoro.ts";
 
 const cfg: Config = { focus: 25, short: 5, long: 15, every: 2, auto: false };
 const M = 60_000;
@@ -50,5 +50,10 @@ const longer = { ...cfg, focus: 50 };
 assert.equal(resize(initial(cfg, t0), cfg, longer).left, 50 * M);
 const paused = pause(start(initial(cfg, t0), t0), t0 + M);
 assert.equal(resize(paused, cfg, longer).left, 24 * M);
+
+// jumping stops the timer at the new spot's full length; finishing that break carries on from it
+const j = jump({ ...start(initial(cfg, t0), t0), done: 3 }, "short", 1, cfg);
+assert.deepEqual([j.phase, j.end, j.left, j.round, j.done], ["short", null, 5 * M, 1, 3]);
+assert.deepEqual([advance(j, cfg, t0, true).phase, advance(j, cfg, t0, true).round], ["focus", 1]);
 
 console.log("pomodoro checks passed");

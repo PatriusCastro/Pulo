@@ -429,6 +429,23 @@ button:focus-visible {
 .music-open {
   margin-left: auto;
 }
+/* "Also playing": a second player; click to show it instead. */
+.also {
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  margin: 0 -8px;
+  font-size: 12px;
+  color: var(--dim);
+}
+.also:hover {
+  color: var(--fg);
+}
+.also-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .music-open:hover {
   color: var(--fg);
 }

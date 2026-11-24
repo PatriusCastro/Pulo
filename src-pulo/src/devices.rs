@@ -88,7 +88,8 @@ fn value(d: &DeviceInformation, key: &str) -> Option<IPropertyValue> {
 /// One query over all Bluetooth device nodes. A device appears as several nodes (one per
 /// profile); group by address, take the name from its root node, battery and connected
 /// state from whichever node has them.
-fn scan() -> Result<Vec<Device>> {
+/// Connected devices: name, battery if it reports one, container.
+fn connected() -> Result<Vec<(String, Option<u8>, Option<GUID>)>> {
     let list = DeviceInformation::FindAllAsyncWithKindAqsFilterAndAdditionalProperties(&HSTRING::from(AQS), &props(), DeviceInformationKind::Device)?.get()?;
     let mut by: BTreeMap<String, (String, bool, Option<u8>, Option<GUID>)> = BTreeMap::new();
     for d in list {
@@ -106,11 +107,16 @@ fn scan() -> Result<Vec<Device>> {
             e.2 = Some(p.min(100));
         }
     }
-    Ok(by
-        .into_values()
-        .filter(|e| e.1 && !e.0.is_empty())
-        .filter_map(|(name, _, pct, container)| Some(Device { name, percent: pct?, kind: container.map_or("other", kind) }))
-        .collect())
+    Ok(by.into_values().filter(|e| e.1 && !e.0.is_empty()).map(|(name, _, pct, container)| (name, pct, container)).collect())
+}
+
+fn scan() -> Result<Vec<Device>> {
+    Ok(connected()?.into_iter().filter_map(|(name, pct, container)| Some(Device { name, percent: pct?, kind: container.map_or("other", kind) })).collect())
+}
+
+/// Every connected Bluetooth device, with its battery when it reports one.
+pub fn connected_names() -> Vec<(String, Option<u8>)> {
+    connected().map(|l| l.into_iter().map(|(n, p, _)| (n, p)).collect()).unwrap_or_default()
 }
 
 fn publish(now: Vec<Device>) {

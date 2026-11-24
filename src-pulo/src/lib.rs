@@ -3,6 +3,8 @@ mod clip;
 mod shots;
 mod devices;
 mod eq;
+mod hw;
+mod picker;
 mod sys;
 mod tools;
 mod update;
@@ -403,6 +405,15 @@ fn launch(app: AppHandle, target: String) {
         "explorer" => "explorer.exe",
         "task_manager" => "taskmgr.exe",
         "clipboard_settings" => "ms-settings:clipboard",
+        // "Open in Windows" buttons on the island's tool pages
+        "display" => "ms-settings:display",
+        "nightlight" => "ms-settings:nightlight",
+        "network" => "ms-settings:network",
+        "bluetooth" => "ms-settings:bluetooth",
+        "power" => "ms-settings:powersleep",
+        "energy_saver" => "ms-settings:batterysaver",
+        "camera_privacy" => "ms-settings:privacy-webcam",
+        "sound" => "ms-settings:sound",
         _ => return,
     };
     sys::open_path(cmd);
@@ -1023,13 +1034,36 @@ pub fn run() {
             shots::open_screenshot,
             shots::screenshot_full,
             tools::hotkey_ok,
+            update::update_status,
+            update::update_click,
+            tools::top_apps,
+            hw::display,
+            hw::set_brightness,
+            hw::set_night_light,
+            hw::radios,
+            hw::set_radio,
+            hw::power,
+            hw::set_power_mode,
+            hw::power_action,
+            hw::set_power_timer,
+            hw::outputs,
+            hw::set_output,
+            picker::pick_color,
+            picker::colors,
             autostart_enabled,
             set_autostart,
             set_window
         ])
         .setup(|app| {
             let _ = sys::APP.set(app.handle().clone());
-            let w = app.get_webview_window("main").expect("main window");
+            // Built here rather than from the config (create: false there) so the island can
+            // use the camera for Camera mirror without WebView2 prompting; nothing else is granted.
+            let w = WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+                .on_permission_request(|_, kind| match kind {
+                    tauri::webview::PermissionKind::Camera => tauri::webview::PermissionResponse::Allow,
+                    _ => tauri::webview::PermissionResponse::Default,
+                })
+                .build()?;
             // Tool window: out of Alt+Tab and the taskbar. No-activate: clicking the island
             // never steals focus from the app you're in (and activation was what dropped the
             // window's transparency, see keep_transparent).
@@ -1126,6 +1160,7 @@ pub fn run() {
                         awake = want;
                         tools::hold_awake(want);
                     }
+                    hw::tick_power_timer();
                     if sys::user_away() != away {
                         away = !away;
                         use tauri::Emitter;

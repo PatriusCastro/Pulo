@@ -23,6 +23,8 @@ pub struct State {
     dark: bool,
     mic_muted: bool,
     awake: bool,
+    wifi: Option<bool>, // None: no such radio
+    bluetooth: Option<bool>,
 }
 
 const THEME: PCWSTR = w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
@@ -141,6 +143,8 @@ pub async fn set_volume(level: f32) {
 pub struct Stats {
     cpu: f64,  // percent; -1 on the first call, which has nothing to compare with
     mem: u32,  // percent in use
+    mem_used: u64, // bytes of RAM
+    mem_total: u64,
     down: f64, // bytes per second, all physical network adapters
     up: f64,
     gpu: f64, // percent like Task Manager's; -1 when unknown (first call, or no counters)
@@ -240,7 +244,7 @@ pub fn stats() -> Stats {
     let (rx, tx) = net_bytes();
     let now = std::time::Instant::now();
     let prev = PREV.lock().unwrap().replace((now, idle, total, rx, tx));
-    let mut s = Stats { cpu: -1.0, mem: mem.dwMemoryLoad, down: 0.0, up: 0.0, gpu: gpu_percent() };
+    let mut s = Stats { cpu: -1.0, mem: mem.dwMemoryLoad, mem_used: mem.ullTotalPhys - mem.ullAvailPhys, mem_total: mem.ullTotalPhys, down: 0.0, up: 0.0, gpu: gpu_percent() };
     if let Some((t0, idle0, total0, rx0, tx0)) = prev {
         let secs = now.duration_since(t0).as_secs_f64().max(0.001);
         let busy = total.saturating_sub(total0);
@@ -251,6 +255,74 @@ pub fn stats() -> Stats {
         s.up = tx.saturating_sub(tx0) as f64 / secs;
     }
     s
+}
+
+// ---------- top apps (the Performance page's Apps view) ----------
+
+#[derive(Serialize)]
+pub struct AppUse {
+    name: String,
+    cpu: f64, // percent of all cores since the last call; 0 on the first
+    mem: u64, // bytes in RAM (working set), summed over the app's processes
+}
+
+/// pid -> (exe path, CPU time in 100 ns) at the last call, and when that was.
+static PROC_PREV: std::sync::Mutex<Option<(std::time::Instant, std::collections::HashMap<u32, u64>)>> = std::sync::Mutex::new(None);
+/// exe path -> name, since reading version info for ~300 processes every 2 s adds up.
+static PROC_NAMES: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> = std::sync::Mutex::new(None);
+
+/// Apps by CPU then memory, processes of one program grouped like Task Manager's. Processes
+/// Pulo isn't allowed to open (elevated, other users, protected) are left out.
+#[tauri::command]
+pub async fn top_apps() -> Vec<AppUse> {
+    use std::collections::HashMap;
+    use windows::Win32::{
+        Foundation::{CloseHandle, FILETIME},
+        System::{Diagnostics::ToolHelp::*, ProcessStatus::*, Threading::*},
+    };
+    let now = std::time::Instant::now();
+    let mut times = HashMap::new();
+    let mut apps: HashMap<String, AppUse> = HashMap::new();
+    let mut prev = PROC_PREV.lock().unwrap();
+    let mut names = PROC_NAMES.lock().unwrap();
+    let names = names.get_or_insert_with(HashMap::new);
+    let secs = prev.as_ref().map(|(t, _)| now.duration_since(*t).as_secs_f64());
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get()) as f64;
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return vec![] };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut more = Process32FirstW(snap, &mut e).is_ok();
+        while more {
+            let pid = e.th32ProcessID;
+            if pid != 0 && let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                let (mut c, mut x, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+                let mut m = PROCESS_MEMORY_COUNTERS { cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32, ..Default::default() };
+                if GetProcessTimes(h, &mut c, &mut x, &mut k, &mut u).is_ok() && K32GetProcessMemoryInfo(h, &mut m, m.cb).as_bool() {
+                    let cpu = ticks(k) + ticks(u);
+                    times.insert(pid, cpu);
+                    let file = String::from_utf16_lossy(&e.szExeFile[..e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len())]);
+                    let name = match exe_path(pid) {
+                        Some(path) => names.entry(path.clone()).or_insert_with(|| describe(&path).unwrap_or_else(|| file.trim_end_matches(".exe").to_string())).clone(),
+                        None => file.trim_end_matches(".exe").to_string(),
+                    };
+                    let busy = match (secs, prev.as_ref().and_then(|(_, p)| p.get(&pid))) {
+                        (Some(s), Some(&before)) if s > 0.0 => cpu.saturating_sub(before) as f64 / 1e7 / s / cores * 100.0,
+                        _ => 0.0,
+                    };
+                    let a = apps.entry(name.clone()).or_insert(AppUse { name, cpu: 0.0, mem: 0 });
+                    a.cpu += busy;
+                    a.mem += m.WorkingSetSize as u64;
+                }
+                let _ = CloseHandle(h);
+            }
+            more = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    *prev = Some((now, times));
+    let mut list: Vec<AppUse> = apps.into_values().collect();
+    list.sort_by(|a, b| b.cpu.total_cmp(&a.cpu).then(b.mem.cmp(&a.mem)));
+    list
 }
 
 // ---------- keyboard shortcut ----------
@@ -287,7 +359,14 @@ pub fn hotkey_ok() -> bool {
 
 #[tauri::command]
 pub async fn tools_state() -> State {
-    State { dark: dark(), mic_muted: mic_muted(), awake: AWAKE.load(Relaxed) }
+    use windows::Devices::Radios::RadioKind;
+    State {
+        dark: dark(),
+        mic_muted: mic_muted(),
+        awake: AWAKE.load(Relaxed),
+        wifi: crate::hw::radio_on(RadioKind::WiFi),
+        bluetooth: crate::hw::radio_on(RadioKind::Bluetooth),
+    }
 }
 
 /// Fixed list, like `launch`: the webview can only pick one of these.
@@ -313,6 +392,14 @@ pub async fn tool(action: String) -> State {
         "empty_bin" => unsafe {
             let _ = SHEmptyRecycleBinW(None, PCWSTR::null(), 0);
         },
+        // Radios that can't be switched (none, or Windows refuses) open their Settings page.
+        "wifi" | "bluetooth" => {
+            use windows::Devices::Radios::RadioKind;
+            let k = if action == "wifi" { RadioKind::WiFi } else { RadioKind::Bluetooth };
+            if !crate::hw::set_radio_on(k, crate::hw::radio_on(k) != Some(true)) {
+                crate::sys::open_path(if action == "wifi" { "ms-settings:network-wifi" } else { "ms-settings:bluetooth" });
+            }
+        }
         _ => {}
     }
     tools_state().await
@@ -330,8 +417,23 @@ mod tests {
         eprintln!("cpu {:.0} mem {} gpu {:.0}", s.cpu, s.mem, s.gpu);
         assert!((0.0..=100.0).contains(&s.cpu), "cpu {}", s.cpu);
         assert!((1..=100).contains(&s.mem), "mem {}", s.mem);
+        assert!(s.mem_used > 0 && s.mem_used < s.mem_total);
         assert!(s.down >= 0.0 && s.up >= 0.0);
         assert!(s.gpu == -1.0 || (0.0..=100.0).contains(&s.gpu), "gpu {}", s.gpu);
+    }
+
+    #[test]
+    fn top_apps_grouped() {
+        let first = tauri::async_runtime::block_on(top_apps());
+        assert!(first.iter().all(|a| a.cpu == 0.0)); // nothing to compare with yet
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let apps = tauri::async_runtime::block_on(top_apps());
+        eprintln!("{:?}", apps.iter().take(5).map(|a| (&a.name, a.cpu.round(), a.mem >> 20)).collect::<Vec<_>>());
+        assert!(apps.len() > 5);
+        let total: f64 = apps.iter().map(|a| a.cpu).sum();
+        assert!((0.0..=105.0).contains(&total), "cpu total {total}"); // timer slack
+        let names: std::collections::HashSet<_> = apps.iter().map(|a| &a.name).collect();
+        assert_eq!(names.len(), apps.len());
     }
 }
 

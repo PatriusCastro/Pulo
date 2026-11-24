@@ -958,6 +958,45 @@ button:focus-visible {
 .seg:hover {
   background: none;
 }
+/* The timer's one segment only shows progress: nothing to click. */
+.seg.still {
+  pointer-events: none;
+}
+/* The row under the time is the same height in every mode (the cycle, the timer's length,
+   nothing for the stopwatch), so the time doesn't move when the mode changes. */
+.focus-row {
+  display: flex;
+  align-items: center;
+  height: 24px;
+}
+.timer-length {
+  justify-content: space-between;
+}
+.timer-length button {
+  width: 24px;
+  height: 24px;
+  color: var(--dim);
+}
+.timer-length button:hover {
+  color: var(--fg);
+}
+.timer-length button:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+.timer-length .chip {
+  width: auto;
+  padding: 0 10px;
+  background: var(--chip);
+  font-size: 12px;
+}
+.timer-length .chip:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.timer-length .chip.on {
+  background: rgba(255, 255, 255, 0.85);
+  color: #111;
+}
 .seg::before {
   content: "";
   position: absolute;

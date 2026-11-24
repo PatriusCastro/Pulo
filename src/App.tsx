@@ -59,7 +59,20 @@ const sizeOf = (m: Mode, bubble: boolean) => (m === "open" ? EXPANDED : m === "p
 const PEEK_DELAY = 120;
 /** A tucked pill sliding out: about its transform transition (.tucked in island.css). */
 const REVEAL = 480;
-const PRESETS = [1, 5, 15, 25];
+const PRESETS = [1, 5, 15, 25, 45, 60];
+/** What the Focus tab shows. Each keeps its own state, so switching doesn't stop the others. */
+type FocusMode = "pomodoro" | "stopwatch" | "timer";
+const FOCUS_MODES: [FocusMode, string][] = [
+  ["pomodoro", "Pomodoro"],
+  ["stopwatch", "Stopwatch"],
+  ["timer", "Timer"],
+];
+/** The plain timer; `min` is the length it was set to. */
+type Timer = P.Countdown & { min: number };
+const TIMER_MAX = 180; // minutes, like a focus round in Settings
+/** Running since `start` (a timestamp, so sleep doesn't drift), on top of what was counted before.
+ *  `since`: when it was first started, for the line under the time. */
+type Stopwatch = { start: number | null; elapsed: number; since?: number };
 const RECENT_MAX = 20;
 const NO_LINES: Line[] = [];
 
@@ -138,6 +151,13 @@ const STALE_MS = 10 * 60_000;
 const fmt = (ms: number) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+/** Counting up: whole seconds passed, with hours once there are any. */
+const fmtUp = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60) % 60;
+  const h = Math.floor(s / 3600);
+  return `${h ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s % 60).padStart(2, "0")}`;
 };
 const fmtDur = (ms: number) => {
   const m = Math.max(0, Math.floor(ms / 60_000));
@@ -250,7 +270,9 @@ export default function App() {
   const bubble = settings.style === "bubble" && !hud;
   const bubbleRef = useRef(bubble);
   bubbleRef.current = bubble;
-  const [timerEnd, setTimerEnd] = useState<number | null>(null);
+  const [timer, setTimer] = useState<Timer>(() => load("timer", null) ?? { min: 25, end: null, left: 25 * 60_000 });
+  const [watch, setWatch] = useState<Stopwatch>(() => load("stopwatch", null) ?? { start: null, elapsed: 0 });
+  const [focusMode, setFocusMode] = useState<FocusMode>(() => load("focus-mode", "pomodoro"));
   const [powerTimer, setPowerTimer] = useState<PowerTimer | null>(null); // sleep / shut down, set on the Power page
   const [now, setNow] = useState(Date.now());
   const leave = useRef<number | undefined>(undefined);
@@ -451,7 +473,12 @@ export default function App() {
         if (!on("notifications")) return;
         const text = [app, title].filter(Boolean).join(" · ");
         addRecent("notification", body ? `${text} · ${body}` : text);
-        showHud({ kind: "notification", level: 1, flag: false, text }, 5000);
+        // Widen to the peek pill so the text fits, then shrink back (as the hotkey does for
+        // open). The HUD outlasts the shrink, so the usual peek never flashes in between.
+        showHud({ kind: "notification", level: 1, flag: false, text }, 5400);
+        if (hovering.current || menuOpen.current || intent.current === "open") return;
+        go("peek");
+        collapseSoon(5000);
       }),
       listen<PowerTimer | null>("power_timer", (e) => setPowerTimer(e.payload)),
       listen<string>("color_picked", (e) => showHud({ kind: "color", level: 1, flag: false, text: `Copied ${e.payload}`, swatch: e.payload }, 3000)),
@@ -552,22 +579,30 @@ export default function App() {
     return () => clearTimeout(id);
   }, []);
 
-  // Quick timer: ticks only while one is running.
+  // Timer: ticks only while it runs. Saved like the pomodoro, so it survives a restart.
+  useEffect(() => save("timer", timer), [timer]);
   useEffect(() => {
-    if (!timerEnd) return;
+    if (timer.end === null) return;
     const id = window.setInterval(() => {
       const t = Date.now();
       setNow(t);
-      if (t >= timerEnd) {
-        setTimerEnd(null);
-        if (audio.current) chime(audio.current);
-        cheer();
-        addRecent("timer", "Timer done");
-        showHud({ kind: "timer", level: 1, flag: false, text: "Timer done" }, 6000);
-      }
+      if (t < timer.end!) return;
+      setTimer({ ...timer, end: null, left: timer.min * 60_000 });
+      if (t - timer.end! > 60_000) return; // ended while the PC slept or Pulo was closed: nobody is waiting
+      if (audio.current) chime(audio.current);
+      cheer();
+      addRecent("timer", "Timer done");
+      showHud({ kind: "timer", level: 1, flag: false, text: "Timer done" }, 6000);
     }, 1000);
     return () => clearInterval(id);
-  }, [timerEnd]);
+  }, [timer]);
+  // Stopwatch: the same, counting up.
+  useEffect(() => save("stopwatch", watch), [watch]);
+  useEffect(() => {
+    if (watch.start === null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [watch.start]);
 
   // Sleep / shut down timer: Rust holds it and acts on it; the pill counts down and warns
   // a minute before, so there's time to cancel it on the Power page.
@@ -589,10 +624,25 @@ export default function App() {
     return () => clearInterval(id);
   }, [powerTimer]);
 
-  const startTimer = (min: number) => {
+  const timerStart = () => {
     audio.current ??= new AudioContext(); // created on a click so the chime may play later
     setNow(Date.now());
-    setTimerEnd(Date.now() + min * 60_000);
+    setTimer((t) => P.start(t, Date.now()));
+  };
+  const timerPause = () => setTimer((t) => P.pause(t, Date.now()));
+  /** Set the length (also how it's reset or cancelled: stopped, at its full length). */
+  const timerSet = (min: number) => {
+    const m = Math.min(TIMER_MAX, Math.max(1, min));
+    setTimer({ min: m, end: null, left: m * 60_000 });
+  };
+  const watchToggle = () => {
+    const t = Date.now();
+    setNow(t);
+    setWatch((w) => (w.start === null ? { ...w, start: t, since: w.since ?? t } : { ...w, start: null, elapsed: w.elapsed + t - w.start }));
+  };
+  const pickFocusMode = (m: FocusMode) => {
+    setFocusMode(m);
+    save("focus-mode", m);
   };
 
   // ---------- focus (pomodoro) ----------
@@ -644,7 +694,14 @@ export default function App() {
 
   // ---------- derived ----------
 
-  const remaining = timerEnd ? fmt(timerEnd - now) : null;
+  const timerRunning = focusOn && timer.end !== null;
+  const timerLeft = P.remaining(timer, now);
+  const timerTotal = timer.min * 60_000;
+  const timerActive = focusOn && (timerRunning || timer.left < timerTotal);
+  const remaining = timerRunning ? fmt(timerLeft) : null;
+  const watchRunning = focusOn && watch.start !== null;
+  const watchTime = watch.elapsed + (watch.start === null ? 0 : Math.max(0, now - watch.start));
+  const watchActive = focusOn && (watchRunning || watch.elapsed > 0);
   const date = new Date(now);
   const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const clock = hm(now);
@@ -772,8 +829,8 @@ export default function App() {
   );
 
   const powerLeft = powerTimer && `${powerTimer.action === "sleep" ? "Sleep" : "Off"} ${clockLeft(powerTimer.at - now)}`;
-  const status = remaining ?? powerLeft ?? (pomoRunning ? fmt(pomoLeft) : null) ?? soon;
-  const statusCls = remaining || soon ? "accent" : powerLeft ? "" : phaseCls;
+  const status = remaining ?? powerLeft ?? (pomoRunning ? fmt(pomoLeft) : null) ?? (watchRunning ? fmtUp(watchTime) : null) ?? soon;
+  const statusCls = remaining ? "accent" : powerLeft ? "" : pomoRunning ? phaseCls : "accent";
 
   // One hover area for the pill and the shortcut columns beside it, so moving onto a
   // shortcut doesn't close the island. The window region keeps the rest click-through.
@@ -797,20 +854,10 @@ export default function App() {
   const quickTimer = (
     <div className="timer">
       <Icon d={ICONS.timer} size={14} />
-      {remaining ? (
-        <>
-          <span className="mono">{remaining}</span>
-          <button aria-label="Cancel timer" onClick={() => setTimerEnd(null)}>
-            <Icon d={ICONS.close} size={14} />
-          </button>
-        </>
-      ) : (
-        PRESETS.map((m) => (
-          <button key={m} className="chip" onClick={() => startTimer(m)}>
-            {m}m
-          </button>
-        ))
-      )}
+      <span className="mono">{remaining}</span>
+      <button aria-label="Cancel timer" onClick={() => timerSet(timer.min)}>
+        <Icon d={ICONS.close} size={14} />
+      </button>
     </div>
   );
 
@@ -1031,8 +1078,77 @@ export default function App() {
   const nextPhase = cycle[(atSeg + 1) % cycle.length].phase;
   const segName = (s: (typeof cycle)[number]) =>
     s.phase === "focus" ? `Focus, round ${s.round + 1}` : s.phase === "long" ? "Long break" : `Break after round ${s.round}`;
+  const playButton = (running: boolean, active: boolean, onClick: () => void) => (
+    <button className={`pomo-play accent${running ? " running" : ""}`} aria-label={running ? "Pause" : active ? "Resume" : "Start"} onClick={onClick}>
+      <Icon d={running ? ICONS.pause : ICONS.play} size={22} />
+    </button>
+  );
+  const stopwatchEl = (
+    <div className="pomo">
+      <div className="pomo-head">
+        <span className="accent">Stopwatch</span>
+      </div>
+      <div className="pomo-main">
+        <div>
+          <div className={`pomo-time mono${watchActive && !watchRunning ? " paused" : ""}`}>{fmtUp(watchTime)}</div>
+          <div className="pomo-hint">{watch.start !== null ? `Started ${hm(watch.since ?? watch.start)}` : watchActive ? "Paused" : "Not started"}</div>
+        </div>
+        <div className="pomo-controls">
+          <button aria-label="Reset the stopwatch" title="Reset" onClick={() => setWatch({ start: null, elapsed: 0 })}>
+            <Icon d={ICONS.reset} size={18} />
+          </button>
+          {playButton(watchRunning, watchActive, watchToggle)}
+        </div>
+      </div>
+      <div className="focus-row" />
+    </div>
+  );
+  const timerEl = (
+    <div className="pomo">
+      <div className="pomo-head">
+        <span className="accent">Timer</span>
+        {timerActive && <span>{timer.min} min</span>}
+      </div>
+      <div className="pomo-main">
+        <div>
+          <div className={`pomo-time mono${timerActive && !timerRunning ? " paused" : ""}`}>{fmt(timerLeft)}</div>
+          <div className="pomo-hint">
+            {timerRunning ? `until ${hm(now + timerLeft)}` : timerActive ? "Paused" : `${timer.min} ${timer.min === 1 ? "minute" : "minutes"}`}
+          </div>
+        </div>
+        <div className="pomo-controls">
+          <button aria-label="Reset the timer" title="Reset" onClick={() => timerSet(timer.min)}>
+            <Icon d={ICONS.reset} size={18} />
+          </button>
+          {playButton(timerRunning, timerActive, timerRunning ? timerPause : timerStart)}
+        </div>
+      </div>
+      {timerActive ? (
+        // Like one segment of the pomodoro's cycle, filling as the time runs out.
+        <div className="cycle focus-row">
+          <span className="seg accent now still" style={{ flexGrow: 1, "--fill": `${(1 - timerLeft / timerTotal) * 100}%` } as React.CSSProperties} />
+        </div>
+      ) : (
+        // Its length: a preset, or minute by minute with the buttons at the ends.
+        <div className="focus-row timer-length" role="group" aria-label="Timer length">
+          <button aria-label="One minute less" title="One minute less" disabled={timer.min <= 1} onClick={() => timerSet(timer.min - 1)}>
+            <Icon d={ICONS.minus} size={14} />
+          </button>
+          {PRESETS.map((m) => (
+            <button key={m} className={`chip${m === timer.min ? " on" : ""}`} aria-pressed={m === timer.min} onClick={() => timerSet(m)}>
+              {m}m
+            </button>
+          ))}
+          <button aria-label="One minute more" title="One minute more" disabled={timer.min >= TIMER_MAX} onClick={() => timerSet(timer.min + 1)}>
+            <Icon d={ICONS.plus} size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
   const focusTab = (
     <>
+      {focusMode === "stopwatch" ? stopwatchEl : focusMode === "timer" ? timerEl : (
       <div className="pomo">
         <div className="pomo-head">
           <span className={phaseCls}>
@@ -1060,7 +1176,7 @@ export default function App() {
           </div>
         </div>
         {/* Past segments full, the current one filling, the rest empty. Click one to go there. */}
-        <div className="cycle">
+        <div className="cycle focus-row">
           {cycle.map((s, k) => (
             <button
               key={k}
@@ -1074,9 +1190,14 @@ export default function App() {
           ))}
         </div>
       </div>
-      <div className="bar">
-        <span>Quick timer</span>
-        {quickTimer}
+      )}
+      <div className="seg-slide" role="radiogroup" aria-label="What the Focus tab shows" style={{ "--i": FOCUS_MODES.findIndex(([id]) => id === focusMode), "--n": FOCUS_MODES.length } as React.CSSProperties}>
+        <span className="seg-thumb" aria-hidden="true" />
+        {FOCUS_MODES.map(([id, label]) => (
+          <button key={id} role="radio" aria-checked={id === focusMode} className={id === focusMode ? "on" : ""} onClick={() => pickFocusMode(id)}>
+            {label}
+          </button>
+        ))}
       </div>
     </>
   );
@@ -1234,7 +1355,19 @@ export default function App() {
     </>
   );
 
-  const peekEl = pomoActive ? (
+  // The same order as the resting pill's readout (`status`): timer, pomodoro, stopwatch.
+  const peekEl = timerActive ? (
+    <div className="peek-row">
+      <span className="peek-tag accent">Timer</span>
+      <span className="peek-main mono">{fmt(timerLeft)}</span>
+      <button aria-label={timerRunning ? "Pause" : "Resume"} onClick={only(timerRunning ? timerPause : timerStart)}>
+        <Icon d={timerRunning ? ICONS.pause : ICONS.play} />
+      </button>
+      <button aria-label="Cancel timer" onClick={only(() => timerSet(timer.min))}>
+        <Icon d={ICONS.close} />
+      </button>
+    </div>
+  ) : pomoActive ? (
     <div className="peek-row">
       <span className={`peek-tag ${phaseCls}`}>{P.LABEL[pomo.phase]}</span>
       <span className="peek-main mono">{fmt(pomoLeft)}</span>
@@ -1243,6 +1376,17 @@ export default function App() {
       </button>
       <button aria-label="Skip to the next phase" onClick={only(pomoSkip)}>
         <Icon d={ICONS.next} />
+      </button>
+    </div>
+  ) : watchActive ? (
+    <div className="peek-row">
+      <span className="peek-tag accent">Stopwatch</span>
+      <span className="peek-main mono">{fmtUp(watchTime)}</span>
+      <button aria-label={watchRunning ? "Pause" : "Resume"} onClick={only(watchToggle)}>
+        <Icon d={watchRunning ? ICONS.pause : ICONS.play} />
+      </button>
+      <button aria-label="Reset the stopwatch" onClick={only(() => setWatch({ start: null, elapsed: 0 }))}>
+        <Icon d={ICONS.reset} />
       </button>
     </div>
   ) : media ? (

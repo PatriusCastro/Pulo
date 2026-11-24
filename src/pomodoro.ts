@@ -28,9 +28,11 @@ export const initial = (cfg: Config, now: number): Pomo => ({
   day: dayKey(now),
 });
 
-export const remaining = (p: Pomo, now: number) => (p.end === null ? p.left : Math.max(0, p.end - now));
-export const start = (p: Pomo, now: number): Pomo => (p.end === null ? { ...p, end: now + p.left } : p);
-export const pause = (p: Pomo, now: number): Pomo => (p.end === null ? p : { ...p, left: remaining(p, now), end: null });
+/** Anything that counts down: a pomodoro phase, and the Focus tab's plain timer. */
+export type Countdown = { end: number | null; left: number };
+export const remaining = (p: Countdown, now: number) => (p.end === null ? p.left : Math.max(0, p.end - now));
+export const start = <T extends Countdown>(p: T, now: number): T => (p.end === null ? { ...p, end: now + p.left } : p);
+export const pause = <T extends Countdown>(p: T, now: number): T => (p.end === null ? p : { ...p, left: remaining(p, now), end: null });
 
 /** Move to the next phase. `completed` is false for a skip: a skipped focus round isn't counted. */
 export function advance(p: Pomo, cfg: Config, now: number, completed: boolean): Pomo {

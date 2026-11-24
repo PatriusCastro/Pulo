@@ -1,6 +1,6 @@
 [package]
 name = "pulo"
-version = "0.1.6"
+version = "0.1.7"
 description = "Pulo, a Dynamic Island for Windows"
 authors = ["Pat Castro"]
 edition = "2024"

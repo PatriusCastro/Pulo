@@ -12,7 +12,7 @@ A small pill at the top of your screen that shows what's happening: the song tha
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)](#install)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-[**Download**](https://github.com/PatriusCastro/Pulo/releases) · [**Try it in your browser**](https://patriuscastro.github.io/Pulo/) · [Build from source](#build-from-source)
+[**Download**](https://github.com/PatriusCastro/Pulo/releases) · [**Microsoft Store**](https://apps.microsoft.com/detail/9NZ1DMRRK0PW) · [**Try it in your browser**](https://patriuscastro.github.io/Pulo/) · [Build from source](#build-from-source)
 
 <img src=".github/readme/demo.gif" width="720" alt="The Pulo island at the top of the screen: hovering shows the song, clicking opens the player, and the music page shows synced lyrics">
 
@@ -32,7 +32,7 @@ It stays out of the way and grows only as far as you ask.
 
 | Focus timer | Quick tools |
 |---|---|
-| <img src=".github/readme/focus.png" alt="The Focus tab: a pomodoro ring with rounds and quick timers"> | <img src=".github/readme/tools.png" alt="The Tools tab: dark mode, mic, keep awake, lock, empty bin and scratchpad"> |
+| <img src=".github/readme/focus.png" alt="The Focus tab: a pomodoro round counting down, with a switch for Pomodoro, Stopwatch and Timer"> | <img src=".github/readme/tools.png" alt="The Tools tab: dark mode, mic, keep awake, lock, empty bin and scratchpad"> |
 
 <sub>Captured from the [live demo](https://patriuscastro.github.io/Pulo/), so the songs and lyrics are made up.</sub>
 
@@ -45,7 +45,7 @@ Built with [Tauri 2](https://tauri.app) (Rust) and React. It's light: no looping
 | **Now playing** | Title, artist and art from any app that reports to Windows media controls (Spotify, browsers, Apple Music, …). A live waveform shows in the pill while music plays. |
 | **Music page** | Seek, previous/play/next, shuffle, repeat and speaker volume. |
 | **Synced lyrics** | Big lines in the style of Apple Music and Spotify, on a background tinted by the album cover. Click a line to jump to it. Lyrics come from [lrclib.net](https://lrclib.net). |
-| **Focus timer** | Pomodoro rounds with a progress ring and adjustable lengths. |
+| **Focus timer** | Pomodoro rounds with adjustable lengths, a stopwatch, and a timer you set to the minute. |
 | **Calendar** | Your next event, plus a heads-up 15 minutes before. Works with any iCal link (Google, Outlook, …). |
 | **Downloads** | A notice when a download finishes. Open it later from the Recent tab. |
 | **Notifications** | New Windows notifications appear in the island (MSIX build only). |
@@ -59,7 +59,9 @@ Every feature can be turned off in **Settings**. Press **Ctrl+Alt+Space** to ope
 
 ## Install
 
-Download the installer from [Releases](https://github.com/PatriusCastro/Pulo/releases) and run it. Pulo checks for new versions, and the tray menu offers to install one when it's out. Until the first release is published, [build it from source](#build-from-source).
+Get Pulo from the [Microsoft Store](https://apps.microsoft.com/detail/9NZ1DMRRK0PW), which keeps it up to date.
+
+Or download the installer from [Releases](https://github.com/PatriusCastro/Pulo/releases) and run it. That version checks for new versions itself, and the tray menu offers to install one when it's out. You can also [build it from source](#build-from-source).
 
 Requirements: Windows 10 (version 2004 or newer) or Windows 11, with WebView2, which Windows 11 already includes.
 

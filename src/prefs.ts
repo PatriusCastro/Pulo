@@ -11,7 +11,7 @@ export const FEATURES = [
   ["calendar", "Calendar", "Next event, and a heads-up 15 minutes before"],
   ["agents", "AI agents", "Claude Code sessions, and a notice when a long task finishes"],
   ["devices", "Device batteries", "Bluetooth mouse, keyboard and headphones"],
-  ["focus", "Focus timer", "Pomodoro rounds and quick timers"],
+  ["focus", "Focus timer", "Pomodoro rounds, a stopwatch and a timer"],
   ["todo", "To Do", "A checklist tab in the island"],
   ["tools", "Quick tools", "Wi-Fi, Bluetooth, dark mode, mic mute, keep awake, camera, color picker, lock, Recycle Bin"],
   ["hotkey", "Keyboard shortcut", "Ctrl+Alt+Space opens and closes the island"],

@@ -536,29 +536,26 @@ pub fn poll_notifications() {
     if l.GetAccessStatus() != Ok(UserNotificationListenerAccessStatus::Allowed) {
         return; // not answered yet, or turned off in Settings > Privacy > Notifications
     }
-    let read = || -> Result<Vec<(u32, String, String, String)>> {
-        let toast = KnownNotificationBindings::ToastGeneric()?;
-        let mut out = Vec::new();
-        for n in l.GetNotificationsAsync(NotificationKinds::Toast)?.get()? {
-            let app = n.AppInfo().and_then(|a| a.DisplayInfo()?.DisplayName()).map(|s| s.to_string()).unwrap_or_default();
-            let texts: Vec<String> = n
-                .Notification()
-                .and_then(|x| x.Visual()?.GetBinding(&toast)?.GetTextElements())
-                .map(|t| t.into_iter().filter_map(|e| e.Text().ok().map(|s| s.to_string())).collect())
-                .unwrap_or_default();
-            out.push((n.Id()?, app, texts.first().cloned().unwrap_or_default(), texts.get(1).cloned().unwrap_or_default()));
-        }
-        Ok(out)
-    };
-    let Ok(list) = read() else { return };
+    let Ok(list) = l.GetNotificationsAsync(NotificationKinds::Toast).and_then(|op| op.get()) else { return };
+    let Ok(toast) = KnownNotificationBindings::ToastGeneric() else { return };
     let mut seen = SEEN_NOTIFICATIONS.lock().unwrap();
     let first = seen.is_none(); // don't replay what was already in Action Center at startup
     let ids = seen.get_or_insert_with(Default::default);
-    for (id, app, title, body) in list {
-        if ids.insert(id) && !first {
-            if let Some(a) = APP.get() {
-                let _ = a.emit("notification", (app, title, body));
-            }
+    for n in list {
+        // Only a new toast is read in full: this runs every second, and Action Center can
+        // hold dozens of old ones.
+        let Ok(id) = n.Id() else { continue };
+        if !ids.insert(id) || first {
+            continue;
+        }
+        let app = n.AppInfo().and_then(|a| a.DisplayInfo()?.DisplayName()).map(|s| s.to_string()).unwrap_or_default();
+        let texts: Vec<String> = n
+            .Notification()
+            .and_then(|x| x.Visual()?.GetBinding(&toast)?.GetTextElements())
+            .map(|t| t.into_iter().filter_map(|e| e.Text().ok().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        if let Some(a) = APP.get() {
+            let _ = a.emit("notification", (app, texts.first().cloned().unwrap_or_default(), texts.get(1).cloned().unwrap_or_default()));
         }
     }
 }

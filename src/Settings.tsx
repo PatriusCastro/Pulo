@@ -14,7 +14,7 @@ const PAGES = [
   ["features", "Features", ICONS.apps, FEATURES.map((f) => `${f[1]} ${f[2]}`).join(" ") + " lyrics lrclib"],
   ["tabs", "Tab order", ICONS.tabs, "tabs order now recent focus agents to do todo tools"],
   ["shortcuts", "Shortcuts", ICONS.calculator, "shortcuts buttons beside left right " + Object.values(SHORTCUTS).join(" ")],
-  ["focus", "Focus timer", ICONS.timer, "pomodoro focus break long rounds minutes automatically"],
+  ["focus", "Focus timer", ICONS.timer, "pomodoro focus break long rounds minutes automatically stopwatch timer"],
   ["calendar", "Calendar", ICONS.calendar, "calendar ics ical google outlook events link"],
   ["about", "About", ICONS.info, "version github source problem bug update updates check install"],
 ] as const;

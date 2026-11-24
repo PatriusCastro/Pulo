@@ -3,6 +3,14 @@
 
 export const NOTES: [version: string, items: string[]][] = [
   [
+    "0.1.7",
+    [
+      "Focus tab: switch between Pomodoro, a stopwatch and a timer",
+      "Timer: set any length from 1 minute to 3 hours, pause it, and it survives a restart",
+      "Notifications: the island widens so the whole title fits (Microsoft Store version)",
+    ],
+  ],
+  [
     "0.1.6",
     [
       "Performance page: CPU, memory, GPU and network with live graphs, and the apps using the most",

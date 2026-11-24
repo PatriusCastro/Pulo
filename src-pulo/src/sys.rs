@@ -611,7 +611,7 @@ const AC_DC: GUID = GUID::from_u128(0x5d3e9a59_e9d5_4b00_a6bd_ff34ff516548); // 
 static LAST_BRIGHTNESS: Mutex<Option<u32>> = Mutex::new(None);
 
 /// Desktops get the AC notification too; without this they'd show a "charging 100%" battery.
-fn has_battery() -> bool {
+pub(crate) fn has_battery() -> bool {
     use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
     let mut s = SYSTEM_POWER_STATUS::default();
     // 128 = no system battery, 255 = unknown status

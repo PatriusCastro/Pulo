@@ -4,11 +4,13 @@ import { parseLrc, type Line } from "./lyrics";
 import { Equalizer, LyricsPanel, Pet, Progress, useLyricIndex, type Mood } from "./extras";
 import * as P from "./pomodoro";
 import { ICONS, Icon } from "./icons";
-import { ToolPage, isTool, type ToolId } from "./IslandTools";
+import { ToolPage, clockLeft, fmtRate, isTool, type PowerTimer, type Stats, type ToolId } from "./IslandTools";
 import { TodoTab } from "./Todo";
 import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, TAB_LABEL, type Settings, type Tab } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { notesSince } from "./whatsnew";
 import "./island.css";
 
 type Device = { name: string; percent: number; kind: string };
@@ -29,16 +31,17 @@ type Other = { app: string; title: string; artist: string }; // a second player 
 type Snapshot = { media: Media | null; other?: Other | null; battery: { percent: number; charging: boolean } | null };
 type Session = { agent: string; title: string; project: string; working: boolean; since: number; last: number; model: string };
 type Agents = { sessions: Session[]; tokens_today: number };
-type Tools = { dark: boolean; mic_muted: boolean; awake: boolean };
-type Stats = { cpu: number; mem: number; down: number; up: number; gpu: number };
+/** wifi / bluetooth: null when there's no such radio. */
+type Tools = { dark: boolean; mic_muted: boolean; awake: boolean; wifi?: boolean | null; bluetooth?: boolean | null };
 /** One line in the Recent tab. `path`: a finished download, opened on click. */
 type Recent = { kind: "notification" | "download" | "agent" | "timer" | "focus"; text: string; at: number; path?: string };
 type Hud = {
-  kind: "volume" | "brightness" | "power" | "timer" | "focus" | "download" | "agent" | "notification" | "device" | "mic";
+  kind: "volume" | "brightness" | "power" | "timer" | "focus" | "download" | "agent" | "notification" | "device" | "mic" | "color";
   level: number;
   flag: boolean;
   text?: string;
   icon?: string;
+  swatch?: string; // a picked colour, shown in place of the icon
 };
 
 /** rest: the small pill. peek: hovering, a wider pill with the live thing and its controls.
@@ -70,6 +73,11 @@ const SHORTCUT_ICON: Record<string, string> = {
   explorer: ICONS.folder,
   clipboard: ICONS.clipboard,
   scratchpad: ICONS.note,
+  display: ICONS.brightness,
+  network: ICONS.wifi,
+  power: ICONS.shutdown,
+  color: ICONS.picker,
+  camera: ICONS.camera,
 };
 const HUD_ICON: Partial<Record<Hud["kind"], string>> = {
   notification: ICONS.bell,
@@ -139,8 +147,6 @@ const fmtAgo = (ms: number) => {
   const m = Math.floor(ms / 60_000);
   return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
 };
-const fmtRate = (b: number) =>
-  b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB/s` : b >= 1e3 ? `${Math.round(b / 1e3)} KB/s` : `${Math.round(b)} B/s`;
 /** "claude-opus-5-5" -> "Opus 5.5". Dated ids ("claude-opus-4-20250514") drop the date. */
 const shortModel = (id: string) => {
   const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?!\d)/);
@@ -245,6 +251,7 @@ export default function App() {
   const bubbleRef = useRef(bubble);
   bubbleRef.current = bubble;
   const [timerEnd, setTimerEnd] = useState<number | null>(null);
+  const [powerTimer, setPowerTimer] = useState<PowerTimer | null>(null); // sleep / shut down, set on the Power page
   const [now, setNow] = useState(Date.now());
   const leave = useRef<number | undefined>(undefined);
   const hoverTimer = useRef<number | undefined>(undefined);
@@ -446,6 +453,8 @@ export default function App() {
         addRecent("notification", body ? `${text} · ${body}` : text);
         showHud({ kind: "notification", level: 1, flag: false, text }, 5000);
       }),
+      listen<PowerTimer | null>("power_timer", (e) => setPowerTimer(e.payload)),
+      listen<string>("color_picked", (e) => showHud({ kind: "color", level: 1, flag: false, text: `Copied ${e.payload}`, swatch: e.payload }, 3000)),
       listen<string>("download", (e) => {
         if (!on("downloads")) return;
         cheer();
@@ -560,6 +569,26 @@ export default function App() {
     return () => clearInterval(id);
   }, [timerEnd]);
 
+  // Sleep / shut down timer: Rust holds it and acts on it; the pill counts down and warns
+  // a minute before, so there's time to cancel it on the Power page.
+  useEffect(() => {
+    invoke<{ timer: PowerTimer | null }>("power").then((p) => setPowerTimer(p.timer)); // after a reload
+  }, []);
+  useEffect(() => {
+    if (!powerTimer) return;
+    let warned = powerTimer.at - Date.now() <= 60_000;
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (!warned && powerTimer.at - t <= 60_000) {
+        warned = true;
+        const sleep = powerTimer.action === "sleep";
+        showHud({ kind: "timer", level: 1, flag: true, text: `${sleep ? "Sleeping" : "Shutting down"} in 1 minute`, icon: sleep ? ICONS.sleep : ICONS.shutdown }, 8000);
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [powerTimer]);
+
   const startTimer = (min: number) => {
     audio.current ??= new AudioContext(); // created on a click so the chime may play later
     setNow(Date.now());
@@ -624,6 +653,26 @@ export default function App() {
   useEffect(() => {
     if (mode === "rest") setTool(null); // a shortcut's page lasts until the island closes
   }, [mode]);
+  // What's new: after an update, the next time the island opens it shows the new version's
+  // notes, once. A first install just remembers the version.
+  const [newsPending, setNewsPending] = useState(false);
+  useEffect(() => {
+    getVersion().then((v) => {
+      const seen = load<string | null>("seen-version", null);
+      if (!seen) return save("seen-version", v);
+      if (notesSince(seen, v).length) {
+        setNewsPending(true);
+        showHud({ kind: "notification", level: 1, flag: false, text: `Updated to Pulo ${v} · open to see what's new`, icon: ICONS.info }, 8000);
+      } else if (seen !== v) save("seen-version", v);
+    }, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, at start
+  }, []);
+  useEffect(() => {
+    if (mode !== "open" || !newsPending) return;
+    setNewsPending(false);
+    setTool("whatsnew");
+    getVersion().then((v) => save("seen-version", v)); // seen once it's on screen
+  }, [mode, newsPending]);
   // Synced lyrics show on the music page only; follow the song only while they're on screen.
   const lyricsShown = isOpen && musicPage && showLyrics && lyrics.length > 0;
   const li = useLyricIndex(lyricsShown ? lyrics : NO_LINES, media?.position_ms ?? 0, media?.position_at ?? 0, playing);
@@ -668,7 +717,7 @@ export default function App() {
   const tabs = prefs.tabs.filter((t) => tabOn[t]); // in the order chosen in Settings
   const shown: Tab = tabs.includes(tab) ? tab : "now";
   // System stats: sampled only while someone is looking at them.
-  const statsVisible = mode === "open" && (shown === "tools" || (shown === "now" && !musicPage));
+  const statsVisible = mode === "open" && !tool && (shown === "tools" || (shown === "now" && !musicPage));
   useEffect(() => {
     if (!statsVisible) return;
     const get = () => invoke<Stats>("stats").then(setStats);
@@ -715,15 +764,16 @@ export default function App() {
         </>
       ) : (
         <>
-          <Icon d={hud.icon ?? HUD_ICON[hud.kind] ?? ICONS.bell} />
+          {hud.swatch ? <span className="swatch" style={{ background: hud.swatch }} /> : <Icon d={hud.icon ?? HUD_ICON[hud.kind] ?? ICONS.bell} />}
           <span className={`hud-text${hud.flag ? " low" : ""}`}>{hud.text}</span>
         </>
       )}
     </div>
   );
 
-  const status = remaining ?? (pomoRunning ? fmt(pomoLeft) : null) ?? soon;
-  const statusCls = remaining || soon ? "accent" : phaseCls;
+  const powerLeft = powerTimer && `${powerTimer.action === "sleep" ? "Sleep" : "Off"} ${clockLeft(powerTimer.at - now)}`;
+  const status = remaining ?? powerLeft ?? (pomoRunning ? fmt(pomoLeft) : null) ?? soon;
+  const statusCls = remaining || soon ? "accent" : powerLeft ? "" : phaseCls;
 
   // One hover area for the pill and the shortcut columns beside it, so moving onto a
   // shortcut doesn't close the island. The window region keeps the rest click-through.
@@ -1069,14 +1119,29 @@ export default function App() {
     </>
   );
 
+  // Toggles (pressed is a boolean), one-shot actions, and pages (tool ids) that open over the tabs.
   const tiles: [string, string, string, boolean | undefined][] = [
+    ["wifi", "Wi-Fi", ICONS.wifi, !!tools.wifi],
+    ["bluetooth", "Bluetooth", ICONS.bluetooth, !!tools.bluetooth],
     ["dark", "Dark mode", ICONS.moon, tools.dark],
     ["mic", tools.mic_muted ? "Mic muted" : "Mic on", tools.mic_muted ? ICONS.micOff : ICONS.mic, tools.mic_muted],
     ["awake", "Keep awake", ICONS.coffee, tools.awake],
+    ["camera", "Camera", ICONS.camera, undefined],
+    ["color", "Pick color", ICONS.picker, undefined],
+    ["scratchpad", "Scratchpad", ICONS.note, undefined],
+    ["display", "Display", ICONS.brightness, undefined],
+    ["power", "Power", ICONS.shutdown, undefined],
     ["lock", "Lock", ICONS.lock, undefined],
     ["empty_bin", "Empty bin", ICONS.trash, undefined],
-    ["scratchpad", "Scratchpad", ICONS.note, undefined],
   ];
+  const tile = (action: string) => {
+    if (action === "scratchpad") invoke("launch", { target: "scratchpad" });
+    else if (action === "color") {
+      collapseSoon(0); // out of the picture first
+      invoke("pick_color");
+    } else if (isTool(action)) setTool(action);
+    else runTool(action);
+  };
   const toolsTab = (
     <>
       <div className="tools">
@@ -1085,20 +1150,20 @@ export default function App() {
             key={action}
             className={`tile${pressed ? " on" : ""}${action === "mic" && pressed ? " warn" : ""}`}
             aria-pressed={pressed}
-            onClick={() => (action === "scratchpad" ? invoke("launch", { target: "scratchpad" }) : runTool(action))}
+            onClick={() => tile(action)}
           >
-            <Icon d={icon} size={20} />
+            <Icon d={icon} size={18} />
             <span>{label}</span>
           </button>
         ))}
       </div>
-      <div className="bar mono">
+      <button className="bar mono" title="Open Performance" onClick={() => setTool("task_manager")}>
         <span>
           CPU {stats && stats.cpu >= 0 ? `${Math.round(stats.cpu)}%` : "–"} · Memory {stats ? `${stats.mem}%` : "–"}
           {stats && stats.gpu >= 0 && ` · GPU ${Math.round(stats.gpu)}%`}
         </span>
         <span>{stats && stats.cpu >= 0 ? `↓ ${fmtRate(stats.down)}  ↑ ${fmtRate(stats.up)}` : ""}</span>
-      </div>
+      </button>
     </>
   );
 

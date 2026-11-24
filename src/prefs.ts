@@ -13,7 +13,7 @@ export const FEATURES = [
   ["devices", "Device batteries", "Bluetooth mouse, keyboard and headphones"],
   ["focus", "Focus timer", "Pomodoro rounds and quick timers"],
   ["todo", "To Do", "A checklist tab in the island"],
-  ["tools", "Quick tools", "Dark mode, mic mute, keep awake, lock, Recycle Bin"],
+  ["tools", "Quick tools", "Wi-Fi, Bluetooth, dark mode, mic mute, keep awake, camera, color picker, lock, Recycle Bin"],
   ["hotkey", "Keyboard shortcut", "Ctrl+Alt+Space opens and closes the island"],
   ["pet", "Pet", "The little sprout in the pill"],
 ] as const;
@@ -29,6 +29,11 @@ export const SHORTCUTS: Record<string, string> = {
   explorer: "File Explorer",
   clipboard: "Clipboard history",
   scratchpad: "Scratchpad",
+  display: "Display",
+  network: "Wi-Fi & Bluetooth",
+  power: "Power",
+  color: "Color picker",
+  camera: "Camera mirror",
 };
 /** Buttons that fit in one side column. Also MAX_SHORTCUTS in lib.rs. */
 export const MAX_SHORTCUTS = 5;

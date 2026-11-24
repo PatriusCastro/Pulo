@@ -16,7 +16,7 @@ const PAGES = [
   ["shortcuts", "Shortcuts", ICONS.calculator, "shortcuts buttons beside left right " + Object.values(SHORTCUTS).join(" ")],
   ["focus", "Focus timer", ICONS.timer, "pomodoro focus break long rounds minutes automatically"],
   ["calendar", "Calendar", ICONS.calendar, "calendar ics ical google outlook events link"],
-  ["about", "About", ICONS.info, "version github source problem bug"],
+  ["about", "About", ICONS.info, "version github source problem bug update updates check install"],
 ] as const;
 type Page = (typeof PAGES)[number][0];
 const load = (): Page => {
@@ -162,8 +162,13 @@ export default function Settings() {
   const [page, setPage] = useState<Page>(load);
   const [query, setQuery] = useState("");
   const [version, setVersion] = useState("");
+  // The tray's update item, mirrored: [text, clickable]. null: the Store updates this copy.
+  const [update, setUpdate] = useState<[string, boolean] | null | undefined>(undefined);
   useEffect(() => {
     getVersion().then(setVersion, () => {});
+    invoke<[string, boolean] | null>("update_status").then(setUpdate, () => setUpdate(null));
+    const un = listen<[string, boolean]>("update_status", (e) => setUpdate(e.payload));
+    return () => void un.then((f) => f());
   }, []);
   const go = (p: Page) => {
     setPage(p);
@@ -416,7 +421,29 @@ export default function Settings() {
         <Row label="Pulo" help={version ? `Version ${version}` : undefined}>
           <span />
         </Row>
-        <Row label="Source code and updates" help="github.com/PatriusCastro/pulo">
+        {update !== undefined && (
+          <Row
+            label="Updates"
+            help={
+              update === null
+                ? "The Microsoft Store keeps Pulo up to date"
+                : update[0].startsWith("Install")
+                  ? "A new version is ready. Pulo restarts to install it."
+                  : update[0].startsWith("Update failed")
+                    ? "The update didn't install"
+                    : update[0] === "Check for updates"
+                      ? "Pulo checks once a day"
+                      : update[0] // Checking… / Pulo is up to date / Updating…
+            }
+          >
+            {update && (
+              <button type="button" disabled={!update[1]} onClick={() => invoke("update_click")}>
+                {update[0].startsWith("Install") ? update[0] : update[0].startsWith("Update failed") ? "Retry" : update[0] === "Updating…" ? "Updating…" : "Check now"}
+              </button>
+            )}
+          </Row>
+        )}
+        <Row label="Source code" help="github.com/PatriusCastro/pulo">
           <button type="button" onClick={() => invoke("open_path", { path: "https://github.com/PatriusCastro/pulo" })}>
             Open
           </button>

@@ -1166,15 +1166,26 @@ button.recent-main:hover .recent-text {
 .tools {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(4, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 6px;
 }
 .tile {
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-height: 0;
   border-radius: 14px;
   background: var(--chip);
-  font-size: 12px;
+  font-size: 11px;
+}
+/* The stats line under the tiles opens Performance. */
+button.bar {
+  width: 100%;
+  border-radius: 8px;
+}
+button.bar:hover {
+  background: none;
+  color: var(--fg);
 }
 .tile:hover {
   background: rgba(255, 255, 255, 0.16);
@@ -1590,6 +1601,405 @@ button.recent-main:hover .recent-text {
   color: var(--fg);
 }
 
+/* Performance: four meters, each a number that glides to the new sample (JS, then still),
+   blurred while its digits roll, over a minute-long graph. Monochrome, like the rest. */
+.perf-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 6px;
+}
+.perf-card {
+  position: relative;
+  min-height: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.perf-top {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.perf-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dim);
+}
+.perf-value {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.perf-sub {
+  position: relative;
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.perf-graph {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 55%;
+}
+.perf-graph polygon {
+  fill: var(--fg);
+  opacity: 0.08;
+}
+.perf-graph polyline {
+  fill: none;
+  stroke: var(--fg);
+  stroke-opacity: 0.5;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+/* Chips on tool pages: a choice among a few (sound output, power mode, Overview/Apps). */
+.tool .chip {
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--chip);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tool .chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.tool .chip.on {
+  background: rgba(255, 255, 255, 0.85);
+  color: #111;
+}
+.chips {
+  display: flex;
+  gap: 4px;
+}
+.chips.wide .chip {
+  flex: 1;
+  padding: 6px 0;
+}
+.out-row {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pad-chip {
+  align-self: flex-start;
+  margin: 4px;
+}
+
+/* On/off row, like Quick Settings: badge, label over state, switch. */
+.toggle-row {
+  flex: none;
+  justify-content: flex-start;
+  gap: 10px;
+  height: 42px;
+  padding: 0 10px 0 4px;
+  border-radius: 12px;
+  text-align: left;
+}
+.toggle-row:disabled {
+  opacity: 0.5;
+}
+.toggle-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+.toggle-text small {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.switch {
+  flex: none;
+  position: relative;
+  width: 30px;
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.2s ease;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 0.2s var(--morph);
+}
+.toggle-row.on .switch {
+  background: var(--accent);
+}
+.toggle-row.on .switch::after {
+  transform: translateX(12px);
+  background: #111;
+}
+.bt-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px 0 44px;
+  font-size: 12px;
+}
+.bt-row .vol-pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--dim);
+}
+
+/* Performance > Apps: name, CPU, memory; the column heads sort. */
+.apps {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.apps-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 56px 64px;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.apps-row > :not(:first-child) {
+  justify-self: end;
+}
+.apps-row.head {
+  color: var(--dim);
+  font-size: 11px;
+}
+.apps-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.apps-sort {
+  padding: 1px 6px;
+  color: var(--dim);
+}
+.apps-sort.on {
+  color: var(--fg);
+}
+
+/* Power, top to bottom: battery and energy saver, power mode, a sleep / shut down timer,
+   then two groups of actions (harmless, then the ones that end the session). */
+.power-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+.power-top .tool-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.power-pct {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+/* A small battery gauge next to the number, not a bar across the page. */
+.batt-gauge {
+  flex: none;
+  position: relative;
+  width: 26px;
+  height: 12px;
+  padding: 2px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.35);
+}
+.batt-gauge::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: -3px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: rgba(255, 255, 255, 0.35);
+}
+.batt-gauge > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--fg);
+  transition: width 0.6s var(--morph);
+}
+.tool .chip.saver:not(.on) {
+  background: none;
+  color: var(--dim);
+}
+.tool .chip.saver:not(.on):hover {
+  background: var(--chip);
+  color: var(--fg);
+}
+/* Segmented control: the light thumb slides to the choice (once, on the compositor). */
+.seg-slide {
+  flex: none;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--chip);
+}
+.seg-slide.small {
+  display: inline-grid;
+}
+.seg-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--n));
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  transform: translateX(calc(100% * var(--i)));
+  transition: transform 0.35s var(--morph);
+}
+.seg-slide button {
+  position: relative; /* above the thumb */
+  height: 26px;
+  font-size: 12px;
+  color: var(--dim);
+  transition: color 0.2s ease;
+}
+.seg-slide.small button {
+  height: 22px;
+  padding: 0 10px;
+}
+.seg-slide button:hover {
+  background: none;
+  color: var(--fg);
+}
+.seg-slide button.on {
+  color: #111;
+}
+.power-timer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--dim);
+}
+/* Running: a quiet card so the countdown reads as state, not as more buttons. */
+.power-timer.running {
+  padding: 0 4px 0 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fg);
+}
+.power-timer .chip {
+  color: var(--fg);
+}
+/* Presets start something: outlined, so they don't read as the selected option. */
+.tool .chip.ghost {
+  background: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+.tool .chip.ghost:hover {
+  background: var(--chip);
+}
+.power-actions {
+  flex: none;
+  margin-top: auto; /* sits at the bottom; the space goes above it */
+  display: flex;
+  gap: 12px;
+}
+.power-group {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.power-group .tile {
+  height: 52px;
+  gap: 3px;
+  border-radius: 12px;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.power-group .tile.end:hover {
+  background: rgba(255, 107, 94, 0.14);
+  color: #ff8a80;
+}
+.power-group .tile.warn {
+  background: rgba(255, 107, 94, 0.24);
+  color: #ff6b5e;
+}
+.tool-head .chips {
+  margin-left: 6px;
+}
+
+/* Color picker: the latest pick with its codes, then older ones. */
+.color-latest {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.swatch.big {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+.hud .swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 /* Screenshot: two ways to take one, then the latest few. */
 .shot-modes {
   flex: none;
@@ -1757,4 +2167,50 @@ button.recent-main:hover .recent-text {
   .todo-box {
     transition: none;
   }
+}
+
+/* What's new: the latest version's changes, older versions under their own heading. */
+.news {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 0 4px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.news ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.news li {
+  margin-bottom: 4px;
+}
+.news li::marker {
+  color: var(--dim);
+}
+.news h3 {
+  margin: 8px 0 4px;
+}
+
+/* Camera mirror: the picture fills the page; flipped like a mirror unless turned off. */
+.cam {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+}
+.cam video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cam video.mirror {
+  transform: scaleX(-1);
 }

@@ -42,5 +42,7 @@
     <rescap:Capability Name="runFullTrust" />
     <uap3:Capability Name="userNotificationListener" />
     <DeviceCapability Name="bluetooth" /> <!-- device battery levels -->
+    <DeviceCapability Name="radios" /> <!-- Wi-Fi and Bluetooth on/off -->
+    <DeviceCapability Name="webcam" /> <!-- Camera mirror -->
   </Capabilities>
 </Package>

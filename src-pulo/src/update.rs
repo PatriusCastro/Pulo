@@ -12,10 +12,33 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 static ITEM: OnceLock<MenuItem<Wry>> = OnceLock::new();
 static PENDING: Mutex<Option<Update>> = Mutex::new(None);
 
+/// What the tray item says, and whether it can be clicked; Settings shows the same.
+static STATUS: Mutex<Option<(String, bool)>> = Mutex::new(None);
+
 fn label(text: &str, enabled: bool) {
     if let Some(i) = ITEM.get() {
         let _ = i.set_text(text);
         let _ = i.set_enabled(enabled);
+    }
+    *STATUS.lock().unwrap() = Some((text.to_string(), enabled));
+    if let Some(app) = crate::sys::APP.get() {
+        use tauri::Emitter;
+        let _ = app.emit("update_status", (text, enabled));
+    }
+}
+
+/// None: this copy updates through the Microsoft Store, not from GitHub.
+#[tauri::command]
+pub fn update_status() -> Option<(String, bool)> {
+    ITEM.get()?;
+    Some(STATUS.lock().unwrap().clone().unwrap_or(("Check for updates".into(), true)))
+}
+
+/// Settings' button: the same as clicking the tray item.
+#[tauri::command]
+pub fn update_click(app: AppHandle) {
+    if ITEM.get().is_some() {
+        clicked(&app);
     }
 }
 

@@ -11,7 +11,7 @@ export async function listen(name: string, f: Handler) {
   return () => handlers.set(name, (handlers.get(name) ?? []).filter((g) => g !== f));
 }
 export const getCurrentWebview = () => ({ onDragDropEvent: async () => () => {} });
-export const getVersion = async () => "0.1.4"; // @tauri-apps/api/app
+export const getVersion = async () => "0.1.7"; // @tauri-apps/api/app
 
 const SONGS = [
   {
@@ -41,6 +41,11 @@ let rev = 1;
 let volume = 0.62;
 let muted = false;
 const tools = { dark: true, mic_muted: false, awake: false };
+let night = false;
+const radios = { wifi: true, bluetooth: true };
+type Mode = "efficiency" | "balanced" | "performance";
+type Timer = { action: "sleep" | "shutdown"; at: number } | null;
+const power = { mode: "balanced" as Mode, battery: { percent: 76, charging: false, left: 15_600 }, saver: false, timer: null as Timer };
 
 const now = () => (playing ? Math.min(SONGS[i].ms, pos + Date.now() - at) : pos);
 const media = () => ({
@@ -152,17 +157,40 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
       if (a === "awake") tools.awake = !tools.awake;
       return { ...tools };
     }
-    case "stats":
-      return { cpu: 12 + Math.random() * 10, mem: Math.round(48 + Math.random() * 3), down: 120_000 * Math.random(), up: 20_000 * Math.random(), gpu: 4 + Math.random() * 6 };
+    case "stats": {
+      const mem = 48 + Math.random() * 3;
+      return { cpu: 12 + Math.random() * 10, mem: Math.round(mem), mem_used: (mem / 100) * 16 * 2 ** 30, mem_total: 16 * 2 ** 30, down: 120_000 * Math.random(), up: 20_000 * Math.random(), gpu: 4 + Math.random() * 6 };
+    }
+    case "top_apps":
+      return [["Google Chrome", 6.2, 1.9], ["Spotify", 2.4, 0.4], ["Code", 1.8, 1.2], ["Discord", 1.1, 0.5], ["Explorer", 0.6, 0.2], ["Pulo", 0.3, 0.1]]
+        .map(([name, cpu, gb]) => ({ name, cpu: Number(cpu) + Math.random(), mem: Number(gb) * 2 ** 30 }));
+    case "outputs":
+    case "set_output":
+      return [{ id: "spk", name: "Speakers", on: args.id !== "buds" }, { id: "buds", name: "Buds", on: args.id === "buds" }];
+    case "display":
+      return { screens: [{ id: "1", name: "Built-in display", level: 70 }, { id: "2", name: "Monitor", level: 50 }], night: night };
+    case "set_night_light":
+      night = !!args.on;
+      return night;
+    case "radios":
+      return { ...radios, network: radios.wifi ? "Home" : null, devices: radios.bluetooth ? [{ name: "Buds", battery: 64 }, { name: "Mouse", battery: 41 }] : [] };
+    case "set_radio":
+      radios[args.kind as "wifi" | "bluetooth"] = !!args.on;
+      return invoke("radios");
+    case "power":
+      return power;
+    case "set_power_mode":
+      power.mode = args.mode as Mode;
+      return power;
+    case "set_power_timer":
+      power.timer = args.action ? { action: args.action as "sleep" | "shutdown", at: Date.now() + Number(args.minutes) * 60_000 } : null;
+      return power.timer;
+    case "colors":
+      return ["#3DDC84", "#FF9F43", "#5AC8FA"];
     case "calendar":
       return ics();
     case "agents":
-      return {
-        sessions: [{ agent: "claude", title: "Make the island follow the mouse", project: "pulo", working: true, since: Date.now() - 260_000, last: Date.now(), model: "opus" },
-          { agent: "claude", title: "Write the release notes", project: "pulo", working: false, since: Date.now() - 3_600_000, last: Date.now() - 1_500_000, model: "claude-sonnet-5-5" },
-        ],
-        tokens_today: 184_200,
-      };
+      return agents();
     case "devices":
       return [{ name: "Buds", percent: 64, kind: "headphones" }, { name: "Mouse", percent: 41, kind: "mouse" }];
     case "get_settings":
@@ -190,5 +218,19 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
   }
 }
 
-// A little life while the visitor watches: a download finishes.
+const started = Date.now();
+let agentDone = 0; // when the working session finished; 0 while it works
+const agents = () => ({
+  sessions: [{ agent: "claude", title: "Make the island follow the mouse", project: "pulo", working: !agentDone, since: started - 260_000, last: agentDone || Date.now(), model: "opus" },
+    { agent: "claude", title: "Write the release notes", project: "pulo", working: false, since: started - 3_600_000, last: started - 1_500_000, model: "claude-sonnet-5-5" },
+  ],
+  tokens_today: agentDone ? 191_800 : 184_200,
+});
+
+// A little life while the visitor watches: a download finishes, then Claude does.
 setTimeout(() => emit("download", "C:\\Users\\you\\Downloads\\boarding-pass.pdf"), 9000);
+setTimeout(() => {
+  agentDone = Date.now();
+  emit("agents", agents());
+  emit("agent_done", ["Make the island follow the mouse", "pulo"]);
+}, 20_000);

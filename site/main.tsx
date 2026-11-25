@@ -2,6 +2,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "../src/App";
+import { emit } from "./tauri-demo";
+
+// The page around the iframe can play the pretend PC too, e.g. emit("hotkey") opens the island.
+(window as unknown as { puloDemo: unknown }).puloDemo = { emit };
 
 try {
   localStorage.setItem("tab", JSON.stringify("now"));

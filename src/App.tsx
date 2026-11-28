@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { occurrences, parseIcs, type Raw } from "./ics";
 import { parseLrc, type Line } from "./lyrics";
-import { Equalizer, LyricsPanel, Pet, Progress, useLyricIndex, type Mood } from "./extras";
+import { Equalizer, LyricsPanel, NumInput, Pet, Progress, Stepper, useLyricIndex, type Mood } from "./extras";
 import * as P from "./pomodoro";
 import { ICONS, Icon } from "./icons";
 import { ToolPage, clockLeft, fmtRate, isTool, type PowerTimer, type Stats, type ToolId } from "./IslandTools";
 import { TodoTab } from "./Todo";
-import { EMPTY_SETTINGS, prefsOf, SHORTCUTS, TAB_LABEL, type Settings, type Tab } from "./prefs";
+import { accentOf, EMPTY_SETTINGS, prefsOf, SHORTCUTS, TAB_LABEL, type Settings, type Tab } from "./prefs";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
@@ -48,13 +48,23 @@ type Hud = {
  *  open: clicked, the full panel. */
 type Mode = "rest" | "peek" | "open";
 
-// Must match .pill, .bubble .pill.rest, .pill.peek and .pill.open in island.css (MAX in
+// Must match .pill, .wide.rest > .pill, .bubble .pill.rest, .pill.peek and .pill.open in island.css (MAX in
 // lib.rs is the open pill plus the shortcut columns; resting() there knows rest sizes).
 const COLLAPSED = { w: 200, h: 36 };
 const BUBBLE = { w: 36, h: 36 };
 const PEEK = { w: 360, h: 36 };
 const EXPANDED = { w: 420, h: 268 };
-const sizeOf = (m: Mode, bubble: boolean) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : bubble ? BUBBLE : COLLAPSED);
+/** Clearing Recent: the last row's slide ends by then (.recent-list.clearing in island.css). */
+const CLEAR_MS = 420;
+/** Tools that also sit on Now, under the song or the clock. */
+const QUICK = ["mic", "bluetooth", "dark", "awake"];
+/** Their names there, where a quarter of the row is all the room. */
+const QUICK_LABEL: Record<string, string> = { dark: "Dark", awake: "Awake" };
+/** Removing one row: its slide and fold (.recent-row.leaving). */
+const LEAVE_MS = 300;
+/** A heads-up at rest: the pill stretches out sideways to hold it (.pill.wide). */
+const WIDE = { w: 280, h: 36 };
+const sizeOf = (m: Mode, rest: typeof COLLAPSED) => (m === "open" ? EXPANDED : m === "peek" ? PEEK : rest);
 /** Hover this long before peeking, so passing over the top edge on the way to a tab doesn't. */
 const PEEK_DELAY = 120;
 /** A tucked pill sliding out: about its transform transition (.tucked in island.css). */
@@ -268,8 +278,9 @@ export default function App() {
   const [hud, setHud] = useState<Hud | null>(null);
   // The bubble widens to the plain pill while a HUD (volume, power) needs the room.
   const bubble = settings.style === "bubble" && !hud;
-  const bubbleRef = useRef(bubble);
-  bubbleRef.current = bubble;
+  const rest = hud ? WIDE : bubble ? BUBBLE : COLLAPSED;
+  const restRef = useRef(rest);
+  restRef.current = rest;
   const [timer, setTimer] = useState<Timer>(() => load("timer", null) ?? { min: 25, end: null, left: 25 * 60_000 });
   const [watch, setWatch] = useState<Stopwatch>(() => load("stopwatch", null) ?? { start: null, elapsed: 0 });
   const [focusMode, setFocusMode] = useState<FocusMode>(() => load("focus-mode", "pomodoro"));
@@ -284,6 +295,8 @@ export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [tools, setTools] = useState<Tools>({ dark: false, mic_muted: false, awake: false });
   const micRef = useRef(false);
+  const [inUse, setInUse] = useState<[string[], string[]]>([[], []]); // apps on the camera, the mic
+  const inUseRef = useRef(inUse);
   // Play/pause shown right after a click, until the player reports back.
   const [optimistic, setOptimistic] = useState<boolean | null>(null);
   const optimisticTimer = useRef<number | undefined>(undefined);
@@ -312,16 +325,38 @@ export default function App() {
       save("recent", next);
       return next;
     });
+  // Clear: the rows slide away one after another (.recent-list.clearing), then go. Anything
+  // that arrives meanwhile stays.
+  const [clearing, setClearing] = useState(false);
   const clearRecent = () => {
-    setRecent([]);
-    save("recent", []);
+    if (clearing) return;
+    const asked = Date.now();
+    setClearing(true);
+    const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : CLEAR_MS;
+    window.setTimeout(() => {
+      setRecent((cur) => {
+        const next = cur.filter((r) => r.at > asked);
+        save("recent", next);
+        return next;
+      });
+      setClearing(false);
+    }, ms);
   };
-  const removeRecent = (at: number) =>
-    setRecent((cur) => {
-      const next = cur.filter((r) => r.at !== at);
-      save("recent", next);
-      return next;
-    });
+  // One row: it slides away and folds up (.recent-row.leaving), then goes.
+  const [leaving, setLeaving] = useState<number[]>([]);
+  const removeRecent = (at: number) => {
+    if (leaving.includes(at)) return;
+    setLeaving((l) => [...l, at]);
+    const ms = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : LEAVE_MS;
+    window.setTimeout(() => {
+      setRecent((cur) => {
+        const next = cur.filter((r) => r.at !== at);
+        save("recent", next);
+        return next;
+      });
+      setLeaving((l) => l.filter((x) => x !== at));
+    }, ms);
+  };
 
   const showHud = (h: Hud, ms = 1600) => {
     setHud(h);
@@ -337,9 +372,15 @@ export default function App() {
   const intent = useRef<Mode>("rest");
   // Tucked (auto-hide, or a fullscreen video): at rest the pill hides in the top edge until
   // the mouse comes near, then comes out small; staying on it peeks as usual.
-  const tucked = !!settings.auto_hide || fullscreen;
+  // Or idle: untouched for a minute with "Tuck away when idle" on.
+  const [idle, setIdle] = useState(false);
+  const idleTucked = prefs.idleTuck && idle;
+  const tucked = !!settings.auto_hide || fullscreen || idleTucked;
+  const tuckedRef = useRef(tucked); // for the event listeners, registered once
+  tuckedRef.current = tucked;
   const [out, setOut] = useState(false);
   const outRef = useRef(out);
+  const [moving, setMoving] = useState<"moving" | "arriving" | null>(null);
   const setRegion = (s: { w: number; h: number }, open: boolean) => {
     region.current = { ...s, open, out: outRef.current };
     const p = prefsRef.current;
@@ -347,19 +388,19 @@ export default function App() {
   };
   const comeOut = (on: boolean) => {
     outRef.current = on;
-    if (on) setRegion(sizeOf("rest", bubbleRef.current), false).then(() => outRef.current && setOut(true));
+    if (on) setRegion(sizeOf("rest", restRef.current), false).then(() => outRef.current && setOut(true));
     else {
       setOut(false); // the region follows once it has slid away (onTransitionEnd)
       // Left before it came out, so no transition ends: shrink the region anyway.
       window.setTimeout(() => {
-        if (!outRef.current && region.current.out && intent.current === "rest") setRegion(sizeOf("rest", bubbleRef.current), false);
+        if (!outRef.current && region.current.out && intent.current === "rest") setRegion(sizeOf("rest", restRef.current), false);
       }, REVEAL);
     }
   };
   function go(next: Mode) {
     intent.current = next;
     clearTimeout(hoverTimer.current);
-    const t = sizeOf(next, bubbleRef.current);
+    const t = sizeOf(next, restRef.current);
     const r = region.current;
     if (t.w > r.w || t.h > r.h || (next === "open" && !r.open)) {
       // Only if nothing else was asked for while the region grew (the mouse may have left).
@@ -378,8 +419,11 @@ export default function App() {
     clearTimeout(leave.current);
     if (intent.current !== "rest") return;
     // Tucked away: come out first, and only peek (or open) if the mouse stays once it's out.
+    // Idle, it wakes for good (another minute) instead of coming out for this visit, unless
+    // something else keeps it tucked (auto-hide, a full-screen app): then it comes out as usual.
     const hidden = tucked && !outRef.current;
-    if (hidden) comeOut(true);
+    if (idleTucked) setIdle(false);
+    if (hidden && (settings.auto_hide || fullscreen)) comeOut(true);
     if (prefs.openOn === "hover" && !hidden) return go("open");
     clearTimeout(hoverTimer.current);
     const next = prefs.openOn === "hover" ? "open" : "peek";
@@ -398,19 +442,32 @@ export default function App() {
     clearTimeout(hoverTimer.current);
     collapseSoon(intent.current === "open" ? 400 : 150);
   };
+  // Idle: a minute at rest without the mouse, then tuck. Rust takes it (window on the top
+  // edge, the sliver's region) once the pill has slid up, so the slide isn't clipped.
+  const IDLE_MS = 60_000;
+  useEffect(() => {
+    if (!prefs.idleTuck) return setIdle(false);
+    if (mode !== "rest" || idle || hud) return; // a heads-up restarts the minute
+    const t = window.setTimeout(() => !hovering.current && setIdle(true), IDLE_MS);
+    return () => clearTimeout(t);
+  }, [prefs.idleTuck, mode, idle, hud]);
+  useEffect(() => {
+    const t = window.setTimeout(() => invoke("set_idle", { idle: idleTucked }), idleTucked ? REVEAL : 0);
+    return () => clearTimeout(t);
+  }, [idleTucked]);
   // Shrinking: the region follows once the pill's size transition ends.
   const onTransitionEnd = (e: React.TransitionEvent) => {
     if (e.target !== e.currentTarget || !["width", "height", "transform"].includes(e.propertyName)) return;
-    const t = sizeOf(mode, bubble);
+    const t = sizeOf(mode, rest);
     const r = region.current;
     if (t.w !== r.w || t.h !== r.h || r.open !== (mode === "open") || r.out !== outRef.current) setRegion(t, mode === "open");
   };
   // The resting bubble widening (a HUD, or the style changed in Settings): grow the region
   // with it. Shrinking is left to onTransitionEnd.
   useEffect(() => {
-    if (mode === "rest" && !bubble && region.current.w < COLLAPSED.w) setRegion(COLLAPSED, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the bubble changes
-  }, [bubble]);
+    if (mode === "rest" && region.current.w < rest.w) setRegion(rest, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the resting size changes
+  }, [rest]);
 
   // ---------- data from Rust ----------
 
@@ -420,6 +477,7 @@ export default function App() {
     invoke<Agents>("agents").then(setAgents);
     invoke<Device[]>("devices").then(setDevices);
     invoke<Settings>("get_settings").then(setSettings);
+    invoke<[string, boolean] | null>("update_status").then(setUpdate, () => {});
     invoke<Tools>("tools_state").then((t) => {
       micRef.current = t.mic_muted;
       setTools(t);
@@ -439,10 +497,10 @@ export default function App() {
       }),
       listen<string>("calendar", (e) => setEvents(parseIcs(e.payload))),
       listen<Agents>("agents", (e) => setAgents(e.payload)),
-      listen<[string, string]>("agent_done", (e) => {
+      listen<[string, string, string?]>("agent_done", (e) => {
         if (!on("agents")) return;
         cheer();
-        const text = `Claude finished · ${e.payload[0]}`;
+        const text = `${e.payload[2] ?? "Claude"} finished · ${e.payload[0]}`;
         addRecent("agent", text);
         showHud({ kind: "agent", level: 1, flag: false, text }, 8000);
       }),
@@ -451,11 +509,29 @@ export default function App() {
         if (!on("hotkey")) return;
         if (intent.current === "open") return go("rest");
         go("open");
-        // The mouse may be nowhere near it: close again unless it comes over (onEnter cancels this).
-        collapseSoon(4000);
+        // The mouse may be nowhere near it: close again unless it comes over (onEnter cancels
+        // this). Already over it, it won't "come over" again: leave it open, as for a click.
+        if (hovering.current) clearTimeout(leave.current);
+        else collapseSoon(4000);
+      }),
+      listen<[string, boolean]>("update_status", (e) => {
+        setUpdate(e.payload);
+        if (e.payload[0].startsWith("Update failed")) save("news-after-update", false); // no new version to open to
       }),
       listen<boolean>("away", (e) => setAway(e.payload)),
       listen<boolean>("tucked", (e) => setFullscreen(e.payload)),
+      // To another screen (follow, lib.rs): out, then a quick way in (.arriving).
+      listen<boolean>("moving", (e) => {
+        // The mouse went to another screen: close now, as it goes, not after the leave delay
+        // (a close landing mid-move looked like a glitch).
+        if (e.payload && !menuOpen.current && !typing.current && intent.current !== "rest") {
+          clearTimeout(leave.current);
+          go("rest");
+          if (outRef.current) comeOut(false);
+        }
+        setMoving(e.payload ? "moving" : "arriving");
+        if (!e.payload) window.setTimeout(() => setMoving((m) => (m === "arriving" ? null : m)), 300);
+      }),
       // Click-through mode (watch_click_through in lib.rs; it also fades the window): treat
       // clicks starting to pass through as the mouse leaving.
       listen<boolean>("passthrough", (e) => e.payload && onLeave()),
@@ -475,10 +551,16 @@ export default function App() {
         addRecent("notification", body ? `${text} · ${body}` : text);
         // Widen to the peek pill so the text fits, then shrink back (as the hotkey does for
         // open). The HUD outlasts the shrink, so the usual peek never flashes in between.
-        showHud({ kind: "notification", level: 1, flag: false, text }, 5400);
+        // Tucked into the top edge (auto-hide, a full-screen app): come out first, as for the
+        // mouse, or it widens out of sight.
+        const hidden = tuckedRef.current && !outRef.current;
+        const wait = hidden ? REVEAL : 0;
+        showHud({ kind: "notification", level: 1, flag: false, text }, 5400 + wait);
         if (hovering.current || menuOpen.current || intent.current === "open") return;
-        go("peek");
-        collapseSoon(5000);
+        if (hidden) comeOut(true);
+        clearTimeout(hoverTimer.current);
+        hoverTimer.current = window.setTimeout(() => go("peek"), wait);
+        collapseSoon(5000 + wait); // also tucks it back in
       }),
       listen<PowerTimer | null>("power_timer", (e) => setPowerTimer(e.payload)),
       listen<string>("color_picked", (e) => showHud({ kind: "color", level: 1, flag: false, text: `Copied ${e.payload}`, swatch: e.payload }, 3000)),
@@ -487,6 +569,17 @@ export default function App() {
         cheer();
         addRecent("download", fileName(e.payload), e.payload);
         showHud({ kind: "download", level: 1, flag: false, text: fileName(e.payload) }, 4000);
+      }),
+      // Camera and mic in use (Rust sends it on change): a heads-up for each app that starts.
+      listen<[string[], string[]]>("in_use", (e) => {
+        const [cam, mic] = e.payload;
+        const [wasCam, wasMic] = inUseRef.current;
+        inUseRef.current = e.payload;
+        setInUse(e.payload);
+        const app = cam.find((a) => !wasCam.includes(a));
+        const heard = mic.find((a) => !wasMic.includes(a));
+        if (app) showHud({ kind: "mic", level: 1, flag: false, text: `${app} is using the camera`, icon: ICONS.camera }, 3000);
+        else if (heard) showHud({ kind: "mic", level: 1, flag: false, text: `${heard} is using the microphone`, icon: ICONS.mic }, 3000);
       }),
       // Fires on mic level changes too; only a change of mute counts.
       listen<boolean>("mic", (e) => {
@@ -675,6 +768,9 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [pomo, cfg]);
+  // Lengths edited in the Focus tab: saved like Settings saves them, then followed above.
+  const [editPomo, setEditPomo] = useState(false);
+  const setPomoCfg = (next: P.Config) => invoke("set_prefs", { ui: { ...prefs, pomodoro: next } });
   const pomoStart = () => {
     audio.current ??= new AudioContext();
     setNow(Date.now());
@@ -713,13 +809,33 @@ export default function App() {
   // What's new: after an update, the next time the island opens it shows the new version's
   // notes, once. A first install just remembers the version.
   const [newsPending, setNewsPending] = useState(false);
+  // The tray's update item (update.rs): [text, clickable]. null: the Store updates this copy.
+  const [update, setUpdate] = useState<[string, boolean] | null>(null);
+  const updateLabel = !update
+    ? null
+    : update[0].startsWith("Install")
+      ? "Update now"
+      : update[0] === "Updating…"
+        ? "Updating…"
+        : update[0].startsWith("Update failed")
+          ? "Retry update"
+          : null;
   useEffect(() => {
     getVersion().then((v) => {
+      // Good for this start only: an update that never happened mustn't open a later one.
+      const fromIsland = load("news-after-update", false);
+      save("news-after-update", false);
       const seen = load<string | null>("seen-version", null);
       if (!seen) return save("seen-version", v);
       if (notesSince(seen, v).length) {
         setNewsPending(true);
-        showHud({ kind: "notification", level: 1, flag: false, text: `Updated to Pulo ${v} · open to see what's new`, icon: ICONS.info }, 8000);
+        if (fromIsland) {
+          // Updated from the island's Update now: open straight to the notes.
+          window.setTimeout(() => {
+            go("open");
+            collapseSoon(15_000); // the mouse may be elsewhere; coming over cancels this
+          }, 1000);
+        } else showHud({ kind: "notification", level: 1, flag: false, text: `Updated to Pulo ${v} · open to see what's new`, icon: ICONS.info }, 8000);
       } else if (seen !== v) save("seen-version", v);
     }, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, at start
@@ -794,11 +910,26 @@ export default function App() {
     optimisticTimer.current = window.setTimeout(() => setOptimistic(null), 1500);
     invoke("media", { action: "toggle" });
   };
-  const runTool = (action: string) =>
-    invoke<Tools>("tool", { action }).then((t) => {
+  // The switches may have changed outside Pulo (Windows' own dark mode, Bluetooth): re-read
+  // them each time the island opens.
+  // A tap made while that read is on its way wins: the read was taken before it.
+  const toolTaps = useRef(0);
+  useEffect(() => {
+    if (!isOpen || !toolsOn) return;
+    const taps = toolTaps.current;
+    invoke<Tools>("tools_state").then((t) => {
+      if (toolTaps.current !== taps) return;
       micRef.current = t.mic_muted;
       setTools(t);
     });
+  }, [isOpen, toolsOn]);
+  const runTool = (action: string) => {
+    toolTaps.current++;
+    return invoke<Tools>("tool", { action }).then((t) => {
+      micRef.current = t.mic_muted;
+      setTools(t);
+    });
+  };
 
   // ---------- pieces ----------
 
@@ -993,8 +1124,55 @@ export default function App() {
   useLayoutEffect(() => {
     const el = tabsRef.current?.querySelector<HTMLElement>(".tab.on");
     setInd((p) => (el ? { x: el.offsetLeft, w: el.offsetWidth, slide: !!p } : null));
-  }, [shown, tabs.join(), musicOpen, tool]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [shown, tabs.join(), musicOpen, tool, !!updateLabel]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Toggles (pressed is a boolean), one-shot actions, and pages (tool ids) that open over the tabs.
+  const tiles: [string, string, string, boolean | undefined][] = [
+    ["wifi", "Wi-Fi", ICONS.wifi, !!tools.wifi],
+    ["bluetooth", "Bluetooth", ICONS.bluetooth, !!tools.bluetooth],
+    ["dark", "Dark mode", ICONS.moon, tools.dark],
+    ["mic", tools.mic_muted ? "Mic muted" : "Mic on", tools.mic_muted ? ICONS.micOff : ICONS.mic, tools.mic_muted],
+    ["awake", "Keep awake", ICONS.coffee, tools.awake],
+    ["camera", "Camera", ICONS.camera, undefined],
+    ["color", "Pick color", ICONS.picker, undefined],
+    ["scratchpad", "Scratchpad", ICONS.note, undefined],
+    ["display", "Display", ICONS.brightness, undefined],
+    ["power", "Power", ICONS.shutdown, undefined],
+    ["lock", "Lock", ICONS.lock, undefined],
+    ["empty_bin", "Empty bin", ICONS.trash, undefined],
+  ];
+  const [played, setPlayed] = useState<{ id: string; n: number; on: boolean } | null>(null); // last tile tapped
+  const tile = (action: string) => {
+    if (action === "scratchpad") invoke("launch", { target: "scratchpad" });
+    else if (action === "color") {
+      collapseSoon(0); // out of the picture first
+      invoke("pick_color");
+    } else if (isTool(action)) setTool(action);
+    else runTool(action);
+  };
+  // A tile in Tools, or (`cls` "quick") one of the four switches on Now.
+  const tileBtn = ([action, label, icon, pressed]: (typeof tiles)[number], cls = "tile") => {
+    const play = played?.id === action ? played : null;
+    return (
+      <button
+        key={action}
+        className={`${cls}${pressed ? " on" : ""}${action === "mic" && pressed ? " warn" : ""}`}
+        aria-pressed={pressed}
+        tabIndex={isOpen ? 0 : -1}
+        onClick={() => {
+          // A toggle plays the way it's going; the state itself follows from Rust.
+          setPlayed((p) => ({ id: action, n: (p?.n ?? 0) + 1, on: pressed === undefined || !pressed }));
+          tile(action);
+        }}
+      >
+        {/* A new key on each tap restarts the icon's one-shot animation. */}
+        <span key={play?.n ?? 0} className={`tile-ico${play ? ` play ${play.on ? "to-on" : "to-off"}` : ""}`} data-tool={action}>
+          <Icon d={icon} size={cls === "tile" ? 18 : 14} />
+        </span>
+        <span>{cls === "tile" ? label : (QUICK_LABEL[action] ?? label)}</span>
+      </button>
+    );
+  };
   const nowTab = musicPage && musicEl ? musicEl : (
     <>
       {media ? (
@@ -1039,6 +1217,8 @@ export default function App() {
           {nextLabel && <div className="next-event">{nextLabel}</div>}
         </div>
       )}
+      {/* The four switches people reach for most, a tap away without opening Tools. */}
+      {toolsOn && <div className="quick">{tiles.filter(([a]) => QUICK.includes(a)).map((t) => tileBtn(t, "quick-btn"))}</div>}
       <div className="bar">
         <div className="bar-left">
           {battery && (
@@ -1111,7 +1291,15 @@ export default function App() {
       </div>
       <div className="pomo-main">
         <div>
-          <div className={`pomo-time mono${timerActive && !timerRunning ? " paused" : ""}`}>{fmt(timerLeft)}</div>
+          {timerActive ? (
+            <div className={`pomo-time mono${timerRunning ? "" : " paused"}`}>{fmt(timerLeft)}</div>
+          ) : (
+            // Not started: the minutes are a field, so any length is a click and a number away.
+            <div className="pomo-time mono">
+              <NumInput className="time-edit" value={timer.min} min={1} max={TIMER_MAX} label="Timer length in minutes" onSet={timerSet} onTyping={onTyping} />
+              :00
+            </div>
+          )}
           <div className="pomo-hint">
             {timerRunning ? `until ${hm(now + timerLeft)}` : timerActive ? "Paused" : `${timer.min} ${timer.min === 1 ? "minute" : "minutes"}`}
           </div>
@@ -1151,11 +1339,34 @@ export default function App() {
       {focusMode === "stopwatch" ? stopwatchEl : focusMode === "timer" ? timerEl : (
       <div className="pomo">
         <div className="pomo-head">
-          <span className={phaseCls}>
-            {P.LABEL[pomo.phase]} · Round {roundNow} of {cfg.every}
+          <span className={editPomo ? "" : phaseCls}>{editPomo ? "Lengths in minutes" : `${P.LABEL[pomo.phase]} · Round ${roundNow} of ${cfg.every}`}</span>
+          <span className="pomo-head-end">
+            {doneToday > 0 && !editPomo && <span>{doneToday} done today</span>}
+            <button className={`pomo-edit-btn${editPomo ? " on" : ""}`} aria-pressed={editPomo} onClick={() => setEditPomo((e) => !e)}>
+              {editPomo ? "Done" : "Edit"}
+            </button>
           </span>
-          {doneToday > 0 && <span>{doneToday} done today</span>}
         </div>
+        {editPomo ? (
+          // The lengths, right here; Settings > Focus timer has the same plus auto-start.
+          <div className="pomo-edit">
+            {(
+              [
+                ["focus", "Focus", 180, "Focus minutes"],
+                ["short", "Break", 60, "Break minutes"],
+                ["long", "Long break", 120, "Long break minutes"],
+                ["every", "Rounds", 12, "Focus rounds before a long break"],
+              ] as const
+            ).map(([key, label, max, full]) => (
+              // A group, not a <label>: a label passes clicks on its text to its first button (−).
+              <div key={key} className="pomo-field" role="group" aria-label={full} title={full}>
+                <span>{label}</span>
+                <Stepper value={cfg[key]} min={1} max={max} label={full} onTyping={onTyping} onSet={(n) => setPomoCfg({ ...cfg, [key]: n })} />
+              </div>
+            ))}
+          </div>
+        ) : (
+        <>
         <div className="pomo-main">
           <div>
             <div className={`pomo-time mono${pomoActive && !pomoRunning ? " paused" : ""}`}>{fmt(pomoLeft)}</div>
@@ -1189,6 +1400,8 @@ export default function App() {
             />
           ))}
         </div>
+        </>
+        )}
       </div>
       )}
       <div className="seg-slide" role="radiogroup" aria-label="What the Focus tab shows" style={{ "--i": FOCUS_MODES.findIndex(([id]) => id === focusMode), "--n": FOCUS_MODES.length } as React.CSSProperties}>
@@ -1229,7 +1442,7 @@ export default function App() {
         ) : (
           <div className="empty-note">
             <Icon d={ICONS.agent} size={22} />
-            No Claude Code sessions in the last day
+            No Claude Code or Codex sessions in the last day
           </div>
         )}
       </div>
@@ -1240,44 +1453,9 @@ export default function App() {
     </>
   );
 
-  // Toggles (pressed is a boolean), one-shot actions, and pages (tool ids) that open over the tabs.
-  const tiles: [string, string, string, boolean | undefined][] = [
-    ["wifi", "Wi-Fi", ICONS.wifi, !!tools.wifi],
-    ["bluetooth", "Bluetooth", ICONS.bluetooth, !!tools.bluetooth],
-    ["dark", "Dark mode", ICONS.moon, tools.dark],
-    ["mic", tools.mic_muted ? "Mic muted" : "Mic on", tools.mic_muted ? ICONS.micOff : ICONS.mic, tools.mic_muted],
-    ["awake", "Keep awake", ICONS.coffee, tools.awake],
-    ["camera", "Camera", ICONS.camera, undefined],
-    ["color", "Pick color", ICONS.picker, undefined],
-    ["scratchpad", "Scratchpad", ICONS.note, undefined],
-    ["display", "Display", ICONS.brightness, undefined],
-    ["power", "Power", ICONS.shutdown, undefined],
-    ["lock", "Lock", ICONS.lock, undefined],
-    ["empty_bin", "Empty bin", ICONS.trash, undefined],
-  ];
-  const tile = (action: string) => {
-    if (action === "scratchpad") invoke("launch", { target: "scratchpad" });
-    else if (action === "color") {
-      collapseSoon(0); // out of the picture first
-      invoke("pick_color");
-    } else if (isTool(action)) setTool(action);
-    else runTool(action);
-  };
   const toolsTab = (
     <>
-      <div className="tools">
-        {tiles.map(([action, label, icon, pressed]) => (
-          <button
-            key={action}
-            className={`tile${pressed ? " on" : ""}${action === "mic" && pressed ? " warn" : ""}`}
-            aria-pressed={pressed}
-            onClick={() => tile(action)}
-          >
-            <Icon d={icon} size={18} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </div>
+      <div className="tools">{tiles.map((t) => tileBtn(t))}</div>
       <button className="bar mono" title="Open Performance" onClick={() => setTool("task_manager")}>
         <span>
           CPU {stats && stats.cpu >= 0 ? `${Math.round(stats.cpu)}%` : "–"} · Memory {stats ? `${stats.mem}%` : "–"}
@@ -1304,7 +1482,7 @@ export default function App() {
   const recentDays = new Set(recent.map((r) => new Date(r.at).toDateString())).size;
   const recentTab = (
     <>
-      <div className="recent-list">
+      <div className={`recent-list${clearing ? " clearing" : ""}`}>
         {recent.length ? (
           recent.map((r, i) => {
             // A day heading only once the list spans more than today.
@@ -1318,10 +1496,16 @@ export default function App() {
                 <span className="recent-text">{r.text}</span>
               </>
             );
+            // Its place in the clearing cascade; past the first rows they all go at once.
+            const order = { "--i": Math.min(i, 8) } as React.CSSProperties;
             return (
               <Fragment key={`${r.at}${r.text}`}>
-                {head && <div className="recent-day">{day}</div>}
-                <div className="recent-row">
+                {head && (
+                  <div className="recent-day" style={order}>
+                    {day}
+                  </div>
+                )}
+                <div className={`recent-row${leaving.includes(r.at) ? " leaving" : ""}`} style={order}>
                   {r.path ? (
                     <button className="recent-main" title={`Open ${r.path}`} onClick={() => invoke("open_path", { path: r.path })}>
                       {inner}
@@ -1347,7 +1531,7 @@ export default function App() {
       <div className="bar">
         <span>{recent.length ? `${recent.length} recent` : ""}</span>
         {recent.length > 0 && (
-          <button className="chip" onClick={clearRecent}>
+          <button className="chip" onClick={clearRecent} disabled={clearing}>
             Clear
           </button>
         )}
@@ -1389,6 +1573,13 @@ export default function App() {
         <Icon d={ICONS.reset} />
       </button>
     </div>
+  ) : soon && next ? (
+    // A meeting about to start matters more than the song.
+    <div className="peek-row">
+      <span className="peek-tag accent">{minsUntil > 0 ? `In ${minsUntil}m` : "Now"}</span>
+      <span className="peek-main">{next.title}</span>
+      <span className="peek-tag dim mono">{hm(next.start)}</span>
+    </div>
   ) : media ? (
     <div className="peek-row">
       {art ? <img className="mini-art" src={art} alt="" /> : <span className="mini-art empty" />}
@@ -1409,7 +1600,19 @@ export default function App() {
   ) : (
     <div className="peek-row">
       <span className="peek-tag mono">{clock}</span>
-      <span className="peek-main dim">{nextLabel ?? date.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}</span>
+      {/* The most useful line: a power countdown, an agent at work, a call, else what's next. */}
+      {powerLeft ? (
+        <span className="peek-main">{powerLeft}</span>
+      ) : working.length ? (
+        <span className="peek-main">
+          {working[0].agent} · {working[0].title || working[0].project}
+          {working.length > 1 && <span className="dim"> +{working.length - 1}</span>}
+        </span>
+      ) : inUse[0].length || inUse[1].length ? (
+        <span className="peek-main">On a call · {[...new Set([...inUse[0], ...inUse[1]])].join(", ")}</span>
+      ) : (
+        <span className="peek-main dim">{nextLabel ?? date.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}</span>
+      )}
       {micMuted && (
         <span className="mic-off" aria-label="Microphone muted">
           <Icon d={ICONS.micOff} size={14} />
@@ -1420,10 +1623,11 @@ export default function App() {
 
   return (
     <div
-      className={`island ${mode}${settings.style === "notch" ? " notch" : bubble ? " bubble" : ""}${tucked && !out ? " tucked" : ""}`}
+      className={`island ${mode}${hud ? " wide" : ""}${settings.style === "notch" ? " notch" : bubble ? " bubble" : ""}${tucked && !out ? " tucked" : ""}${moving ? ` ${moving} move-${prefs.move}` : ""} mat-${prefs.material}`}
       style={
         {
           "--tint": tint ?? undefined, // the notch's ears take it too
+          "--accent": accentOf(prefs.accent),
           // Tucked, the window sits on the screen's edge; out, the pill drops to the gap (apply_region).
           "--drop": tucked && settings.style !== "notch" ? `${settings.top_gap ?? 6}px` : undefined,
         } as React.CSSProperties
@@ -1461,6 +1665,15 @@ export default function App() {
         <div className="layer mini-layer" aria-hidden={mode !== "rest"}>
           {hudEl || (
             <div className="mini">
+              {(inUse[0].length > 0 || inUse[1].length > 0) && (
+                // Green for the camera, orange for the mic only, as on a phone.
+                <span
+                  className={`live-light${inUse[0].length ? " on-cam" : ""}`}
+                  role="img"
+                  aria-label={inUse[0].length ? `${inUse[0].join(", ")} using the camera` : `${inUse[1].join(", ")} using the microphone`}
+                  title={[inUse[0].length && `Camera: ${inUse[0].join(", ")}`, inUse[1].length && `Microphone: ${inUse[1].join(", ")}`].filter(Boolean).join("\n")}
+                />
+              )}
               <span className="slot">
                 {playing && art ? <img className="mini-art" src={art} alt="" /> : has("pet") && <Pet mood={mood} key={mood} />}
               </span>
@@ -1468,7 +1681,7 @@ export default function App() {
                 className={`center mono${status ? ` ${statusCls}` : ""}${!status && songFlash ? " flash" : ""}`}
                 key={status ? "status" : (songFlash ?? "clock")}
               >
-                {status ?? songFlash ?? clock}
+                {status ?? songFlash ?? (prefs.showTime ? clock : null)}
               </span>
               <span className="slot">
                 {micMuted ? (
@@ -1484,7 +1697,7 @@ export default function App() {
                 ) : playing ? (
                   <Icon d={ICONS.play} size={14} />
                 ) : (
-                  <span className="dot" />
+                  prefs.showDot && <span className="dot" />
                 )}
               </span>
             </div>
@@ -1507,6 +1720,21 @@ export default function App() {
                   {TAB_LABEL[t]}
                 </button>
               ))}
+              {updateLabel && (
+                <button
+                  className="update-now"
+                  title={update![0]}
+                  disabled={!update![1]}
+                  tabIndex={isOpen ? 0 : -1}
+                  onClick={() => {
+                    save("news-after-update", true); // the new version opens to What's new
+                    invoke("update_click");
+                  }}
+                >
+                  <Icon d={ICONS.download} size={13} />
+                  {updateLabel}
+                </button>
+              )}
             </div>
           )}
           <div className={`tab-body${page.current.dir ? ` page-${page.current.dir}` : ""}`} key={pageKey}>

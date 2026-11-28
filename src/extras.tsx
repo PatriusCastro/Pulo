@@ -137,6 +137,70 @@ export function Progress({
   );
 }
 
+/** A whole number you can type, or nudge with the arrow keys or the wheel (Shift: by 5). Set on
+ *  Enter or leaving it; Escape goes back. `onTyping` keeps the island open while it has focus. */
+export function NumInput(p: { value: number; min: number; max: number; label: string; onSet: (n: number) => void; onTyping?: (on: boolean) => void; className?: string }) {
+  const [text, setText] = useState<string | null>(null); // null: not being edited
+  const clamp = (n: number) => Math.min(p.max, Math.max(p.min, n));
+  const commit = () => {
+    const n = Number(text);
+    if (text && Number.isFinite(n) && clamp(n) !== p.value) p.onSet(clamp(n));
+    setText(null);
+  };
+  const shown = text ?? String(p.value);
+  return (
+    <input
+      className={`num${p.className ? ` ${p.className}` : ""}`}
+      aria-label={p.label}
+      inputMode="numeric"
+      value={shown}
+      style={{ width: `${Math.max(1, shown.length) + 0.4}ch` }}
+      onFocus={(e) => {
+        setText(String(p.value));
+        p.onTyping?.(true);
+        e.target.select();
+      }}
+      onChange={(e) => setText(e.target.value.replace(/\D/g, "").slice(0, 3))}
+      onBlur={() => {
+        commit();
+        p.onTyping?.(false);
+      }}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 5 : 1;
+        if (e.key === "Enter") e.currentTarget.blur();
+        else if (e.key === "Escape") {
+          setText(String(p.value));
+          e.currentTarget.blur();
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          setText(String(clamp(Number(shown || p.value) + (e.key === "ArrowUp" ? step : -step))));
+        }
+      }}
+      onWheel={(e) => {
+        const n = clamp((text === null ? p.value : Number(shown || p.value)) + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 5 : 1));
+        if (text === null) n !== p.value && p.onSet(n);
+        else setText(String(n));
+      }}
+    />
+  );
+}
+
+/** − value + : a NumInput with buttons for the mouse. */
+export function Stepper(p: Parameters<typeof NumInput>[0] & { unit?: string }) {
+  return (
+    <span className="stepper">
+      <button aria-label={`${p.label}: less`} disabled={p.value <= p.min} onClick={() => p.onSet(p.value - 1)}>
+        −
+      </button>
+      <NumInput {...p} />
+      {p.unit && <span className="stepper-unit">{p.unit}</span>}
+      <button aria-label={`${p.label}: more`} disabled={p.value >= p.max} onClick={() => p.onSet(p.value + 1)}>
+        +
+      </button>
+    </span>
+  );
+}
+
 export type Mood = "idle" | "sleep" | "work" | "happy";
 
 /** Pulo's pet: a small island sprout. Static except a blink every few seconds and a short

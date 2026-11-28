@@ -1,7 +1,8 @@
-//! AI agent tracker. Follows Claude Code's session logs (~/.claude/projects/<project>/<id>.jsonl),
-//! reading only the lines appended since the last read.
-// ponytail: Claude Code only. Codex (~/.codex/sessions) and Copilot get their own `apply`
-// once their logs exist on a machine to test against.
+//! AI agent tracker. Follows Claude Code's session logs (~/.claude/projects/<project>/<id>.jsonl)
+//! and Codex's (~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl), reading only the lines appended
+//! since the last read.
+// shortcut: Codex parsing follows its documented rollout format, untested against a real log;
+// check `apply_codex` on a machine with Codex installed. Copilot and Cursor would add their own.
 
 use crate::sys::{watch_dir, APP};
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
@@ -42,7 +43,9 @@ pub static AGENTS: Mutex<Agents> = Mutex::new(Agents { sessions: Vec::new(), tok
 
 #[derive(Default)]
 struct Log {
+    agent: &'static str,
     offset: u64,
+    codex_total: u64, // Codex reports running totals; the last one seen
     title: String,
     project: String,
     working: bool,
@@ -120,15 +123,72 @@ fn apply(log: &mut Log, v: &Value) -> Option<i64> {
     }
 }
 
+/// Codex's version of `apply`. Lines are {timestamp, type, payload}; a turn runs from
+/// task_started (or the user's message, in older logs) to task_complete.
+fn apply_codex(log: &mut Log, v: &Value) -> Option<i64> {
+    let ts = v["timestamp"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|d| d.timestamp_millis())?;
+    let p = &v["payload"];
+    if let Some(cwd) = p["cwd"].as_str() {
+        log.project = cwd.rsplit(['\\', '/']).next().unwrap_or(cwd).to_string();
+    }
+    match v["type"].as_str()? {
+        "turn_context" => {
+            if let Some(m) = p["model"].as_str() {
+                log.model = m.to_string();
+            }
+            None
+        }
+        "event_msg" => {
+            log.last = log.last.max(ts);
+            match p["type"].as_str()? {
+                "user_message" | "task_started" => {
+                    if log.title.is_empty() {
+                        let msg = p["message"].as_str().unwrap_or("").trim();
+                        let line = msg.lines().next().unwrap_or("");
+                        log.title = line.chars().take(80).collect();
+                    }
+                    if !log.working {
+                        log.working = true;
+                        log.since = ts;
+                    }
+                    None
+                }
+                "task_complete" if log.working => {
+                    log.working = false;
+                    Some(ts - log.since)
+                }
+                "turn_aborted" => {
+                    log.working = false;
+                    None
+                }
+                "token_count" => {
+                    // Running totals for the session: count what's new since the last report.
+                    let u = &p["info"]["total_token_usage"];
+                    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+                    let total = n("input_tokens").saturating_sub(n("cached_input_tokens")) + n("output_tokens");
+                    if total > log.codex_total {
+                        let add = total - log.codex_total;
+                        log.codex_total = total;
+                        log.counted.insert(format!("{ts}-{total}"), (day(ts)?, add)); // unique: totals only grow
+                    }
+                    None
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 impl Tracker {
     /// Read lines appended to `path` since last time. Returns finished long turns.
-    fn read_new(&mut self, path: &Path) -> Vec<(String, String)> {
+    fn read_new(&mut self, path: &Path, agent: &'static str) -> Vec<(String, String, &'static str)> {
         let mut done = Vec::new();
-        let log = self.logs.entry(path.to_path_buf()).or_default();
+        let log = self.logs.entry(path.to_path_buf()).or_insert_with(|| Log { agent, ..Log::default() });
         let Ok(mut f) = File::open(path) else { return done };
         let len = f.metadata().map(|m| m.len()).unwrap_or(0);
         if len < log.offset {
-            *log = Log::default(); // file was rewritten
+            *log = Log { agent, ..Log::default() }; // file was rewritten
         }
         let mut buf = Vec::new();
         if f.seek(SeekFrom::Start(log.offset)).is_err() || f.read_to_end(&mut buf).is_err() {
@@ -138,10 +198,11 @@ impl Tracker {
         log.offset += end as u64 + 1;
         for line in buf[..end].split(|&b| b == b'\n') {
             let Ok(v) = serde_json::from_slice::<Value>(line) else { continue };
-            if let Some(ms) = apply(log, &v) {
+            let ended = if agent == "Codex" { apply_codex(log, &v) } else { apply(log, &v) };
+            if let Some(ms) = ended {
                 if ms >= LONG_TURN_MS {
                     let title = if log.title.is_empty() { log.project.clone() } else { log.title.clone() };
-                    done.push((title, log.project.clone()));
+                    done.push((title, log.project.clone(), agent));
                 }
             }
         }
@@ -156,7 +217,7 @@ impl Tracker {
             .values()
             .filter(|l| l.last > cutoff)
             .map(|l| Session {
-                agent: "Claude",
+                agent: l.agent,
                 title: l.title.clone(),
                 project: l.project.clone(),
                 working: l.working,
@@ -184,37 +245,59 @@ impl Tracker {
     }
 }
 
-/// Blocks forever; run on its own thread.
-pub fn watch() -> windows::core::Result<()> {
-    let root = PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default()).join(".claude").join("projects");
-    let mut t = Tracker::default();
-    // Catch up silently on the last day's logs so the first notice is a real one.
-    let day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
-    for dir in fs::read_dir(&root).into_iter().flatten().flatten() {
-        for file in fs::read_dir(dir.path()).into_iter().flatten().flatten() {
-            let p = file.path();
-            let recent = file.metadata().and_then(|m| m.modified()).is_ok_and(|t| t > day_ago);
-            if recent && p.extension().is_some_and(|e| e == "jsonl") {
-                t.read_new(&p);
-            }
+static TRACKER: Mutex<Option<Tracker>> = Mutex::new(None);
+
+/// Catch up silently on the last day's logs under `dir`, so the first notice is a real one.
+fn catch_up(t: &mut Tracker, dir: &Path, agent: &'static str, day_ago: SystemTime) {
+    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        let Ok(m) = e.metadata() else { continue };
+        if m.is_dir() {
+            catch_up(t, &p, agent, day_ago);
+        } else if m.modified().is_ok_and(|t| t > day_ago) && p.extension().is_some_and(|e| e == "jsonl") {
+            t.read_new(&p, agent);
         }
     }
-    t.publish();
+}
 
+/// Follow one agent's logs under `root`. Blocks forever; run on its own thread.
+fn follow(root: PathBuf, agent: &'static str) -> windows::core::Result<()> {
+    let day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
+    // Read the backlog unlocked (a lot of history takes a while), then merge it in, so the
+    // other agent's watcher isn't held up.
+    let mut mine = Tracker::default();
+    catch_up(&mut mine, &root, agent, day_ago);
+    {
+        let mut g = TRACKER.lock().unwrap();
+        let t = g.get_or_insert_with(Tracker::default);
+        t.logs.extend(mine.logs);
+        t.publish();
+    }
     let filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE;
     watch_dir(&root.to_string_lossy(), true, filter, |batch| {
         let mut files: Vec<String> = batch.into_iter().map(|(_, n)| n).filter(|n| n.ends_with(".jsonl")).collect();
         files.sort();
         files.dedup();
+        let mut g = TRACKER.lock().unwrap();
+        let t = g.get_or_insert_with(Tracker::default);
         for name in files {
-            for (title, project) in t.read_new(&root.join(&name)) {
+            for done in t.read_new(&root.join(&name), agent) {
                 if let Some(app) = APP.get() {
-                    let _ = app.emit("agent_done", (title, project));
+                    let _ = app.emit("agent_done", done);
                 }
             }
         }
         t.publish();
     })
+}
+
+/// Blocks forever; run on its own thread. An agent that isn't installed has no folder to
+/// watch, and its thread just ends.
+pub fn watch() -> windows::core::Result<()> {
+    let home = PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default());
+    let codex = std::env::var("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|_| home.join(".codex")).join("sessions");
+    std::thread::spawn(move || follow(codex, "Codex"));
+    follow(home.join(".claude").join("projects"), "Claude")
 }
 
 #[cfg(test)]
@@ -253,5 +336,32 @@ mod tests {
         apply(&mut log, &line(r#"{"type":"user","timestamp":"2026-11-18T10:01:00Z","message":{"content":"go"}}"#));
         apply(&mut log, &line(r#"{"type":"user","timestamp":"2026-11-18T10:01:02Z","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#));
         assert!(!log.working);
+    }
+
+    #[test]
+    fn codex_turn_and_tokens() {
+        let mut log = Log { agent: "Codex", ..Log::default() };
+        let tok = |t: &str, input: u64, cached: u64, out: u64| {
+            line(&format!(r#"{{"timestamp":"{t}","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"input_tokens":{input},"cached_input_tokens":{cached},"output_tokens":{out}}}}}}}}}"#))
+        };
+        apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:00:00Z","type":"session_meta","payload":{"cwd":"D:\\Projects\\pulo"}}"#));
+        assert_eq!(log.project, "pulo");
+        apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:00:00Z","type":"turn_context","payload":{"model":"gpt-5-codex"}}"#));
+        assert_eq!(log.model, "gpt-5-codex");
+        assert_eq!(apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Fix the tray menu\nit flickers"}}"#)), None);
+        assert!(log.working);
+        assert_eq!(log.title, "Fix the tray menu");
+        apply_codex(&mut log, &tok("2026-11-18T10:00:10Z", 100, 40, 10)); // 70 new
+        apply_codex(&mut log, &tok("2026-11-18T10:00:11Z", 100, 40, 10)); // repeated: nothing new
+        apply_codex(&mut log, &tok("2026-11-18T10:00:20Z", 300, 140, 30)); // 190 total, 120 new
+        assert_eq!(log.counted.values().map(|(_, n)| n).sum::<u64>(), 190);
+        assert_eq!(apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:00:31Z","type":"event_msg","payload":{"type":"task_complete"}}"#)), Some(30_000));
+        assert!(!log.working);
+        assert_eq!(log.last, DateTime::parse_from_rfc3339("2026-11-18T10:00:31Z").unwrap().timestamp_millis());
+        // an interrupted turn doesn't announce
+        apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:01:00Z","type":"event_msg","payload":{"type":"task_started"}}"#));
+        apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:01:05Z","type":"event_msg","payload":{"type":"turn_aborted"}}"#));
+        assert!(!log.working);
+        assert_eq!(apply_codex(&mut log, &line(r#"{"timestamp":"2026-11-18T10:01:06Z","type":"event_msg","payload":{"type":"task_complete"}}"#)), None);
     }
 }

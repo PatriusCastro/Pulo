@@ -8,7 +8,8 @@
   --border: #d4d4da;
   --hover: rgba(0, 0, 0, 0.04);
   --track: #c6c6cf;
-  --accent: #128a4c;
+  /* Black and white: the accent is the text colour (white on black in dark mode). */
+  --accent: #1b1b1f;
   --on-accent: #ffffff;
   --error: #b42318;
   color-scheme: light;
@@ -25,8 +26,8 @@
     --border: #3d3d43;
     --hover: rgba(255, 255, 255, 0.04);
     --track: #55555e;
-    --accent: #3ddc84;
-    --on-accent: #08130c;
+    --accent: #f2f2f4;
+    --on-accent: #1c1c1f;
     --error: #ff8a80;
     color-scheme: dark;
   }
@@ -44,6 +45,9 @@ body {
 .shell {
   height: 100vh;
   display: flex;
+  /* The page slides up 6 px as it comes in (pane-in): keep that inside the window, or the
+     window itself scrolls for a moment. The pane and the sidebar scroll on their own. */
+  overflow: hidden;
 }
 .nav {
   flex: none;
@@ -126,6 +130,9 @@ body {
   font-size: 12px;
 }
 .pane {
+  /* Holds the hidden radios (.sr, absolute): without it, those far down a long page reach
+     past the window and the whole window scrolls too, a second scrollbar. */
+  position: relative;
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -321,6 +328,83 @@ select:focus-visible,
 .look-art.bubble > span {
   width: 18px;
 }
+/* Material previews: the island's surfaces as in island.css (.mat-*), over half a picture and
+   half a white window, with the pill across the line. */
+.mat-art {
+  background: linear-gradient(110deg, #3a6186, #89253e 50%, #fff 50%, #ececec);
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+}
+.mat-art > span {
+  width: 96px;
+}
+.mat-art.bubble > span {
+  width: 18px;
+}
+.m-glass > span,
+.pv-pill.m-glass {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.18), transparent 45%, rgba(0, 0, 0, 0.14)), rgba(14, 14, 16, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.m-frosted > span,
+.pv-pill.m-frosted {
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.08), transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"),
+    rgba(30, 30, 34, 0.84);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Features: a tally, the sets, then a card per group with its own count. */
+.bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.item-help .bar {
+  margin-top: 6px;
+}
+.buttons {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.group-title {
+  margin: 10px 2px 0;
+}
+.preset {
+  text-align: left;
+}
+.preset .item-label {
+  margin-top: 0;
+}
+.group-head {
+  min-height: 40px;
+}
+.group-head .item-label {
+  flex: 1;
+  font-weight: 600;
+}
+.group-head .count {
+  color: var(--dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.group-head .bar {
+  width: 56px;
+}
+.cost {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.8;
+}
 
 /* Two choices side by side. */
 .seg {
@@ -342,6 +426,26 @@ select:focus-visible,
   color: var(--fg);
   font-weight: 600;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+/* Each one on or off by itself: separate chips with a check, not one choice of several. */
+.seg.multi {
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.seg.multi label {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.seg.multi label.on {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+.seg.multi label.on::before {
+  content: "✓";
+  margin-right: 5px;
+  color: var(--accent);
 }
 
 input[type="range"] {
@@ -589,4 +693,145 @@ input[type="url"] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Appearance preview: the island at rest at its real size, over a picture and a white window. */
+.preview {
+  position: relative;
+  height: 104px;
+  margin-bottom: 14px;
+  border-radius: 8px;
+  background: linear-gradient(110deg, #3a6186, #89253e 50%, #fff 50%, #ececec);
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+  overflow: hidden;
+}
+.pv-pill {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  width: 200px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 18px;
+  background: #000;
+  color: #f5f5f5;
+  font: 600 13px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+}
+.pv-pill.notch {
+  top: 0;
+  border-radius: 0 0 18px 18px;
+}
+.pv-pill.bubble {
+  width: 36px;
+  justify-content: center;
+  padding: 0;
+}
+.pv-slot {
+  width: 24px;
+  display: flex;
+  justify-content: center;
+}
+.pv-time {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pv-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.pv-play {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pv-play:hover {
+  background: #000;
+}
+.pv-play:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* The moves, as in island.css (.moving / .arriving): out quickly, a beat away, back in. */
+.pv-slide {
+  animation: pv-slide 0.6s;
+}
+.pv-fade {
+  animation: pv-fade 0.6s;
+}
+.pv-pop {
+  animation: pv-pop 0.6s;
+}
+@keyframes pv-slide {
+  17%,
+  45% {
+    transform: translate(-50%, calc(-100% - 12px));
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+@keyframes pv-fade {
+  17%,
+  45% {
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+@keyframes pv-pop {
+  17%,
+  45% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.5);
+    animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pv-pill {
+    animation: none;
+  }
+}
+/* Accent: one round swatch each. */
+.swatches {
+  display: flex;
+  gap: 8px;
+}
+.swatches label {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.swatches label.on {
+  border-color: var(--fg);
+}
+.swatches label:has(:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.swatches span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
 }

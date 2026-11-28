@@ -410,7 +410,7 @@ pub fn watch_dir(
         }
         let mut batch = Vec::new();
         let mut off = 0usize;
-        while n > 0 {
+        while n > 0 && off < n as usize {
             let info = unsafe { &*((buf.as_ptr() as *const u8).add(off) as *const FILE_NOTIFY_INFORMATION) };
             let name = String::from_utf16_lossy(unsafe {
                 std::slice::from_raw_parts(info.FileName.as_ptr(), info.FileNameLength as usize / 2)

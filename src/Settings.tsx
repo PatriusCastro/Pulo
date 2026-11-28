@@ -3,15 +3,16 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { parseIcs } from "./ics";
-import { EMPTY_SETTINGS, FEATURES, MAX_SHORTCUTS, prefsOf, SHORTCUTS, STYLES, TAB_LABEL, type Prefs, type Settings as Saved } from "./prefs";
+import { ACCENTS, accentOf, COST, EMPTY_SETTINGS, FEATURES, GROUPS, MATERIALS, MAX_SHORTCUTS, MOVES, PRESETS, prefsOf, SHORTCUTS, STYLES, TAB_LABEL, type Prefs, type Settings as Saved } from "./prefs";
 import { ICONS, Icon } from "./icons";
+import { Pet } from "./extras";
 import "./settings.css";
 
 // The pages in the sidebar. The words after the title are what the search box also matches.
 const PAGES = [
-  ["look", "Appearance", ICONS.palette, "look style pill notch bubble space gap top open hover click"],
-  ["behavior", "Behavior", ICONS.gear, "start windows startup login hide mouse near tuck fullscreen full-screen video youtube browser chrome edge firefox maximized apps click through ctrl screenshots recording sharing"],
-  ["features", "Features", ICONS.apps, FEATURES.map((f) => `${f[1]} ${f[2]}`).join(" ") + " lyrics lrclib"],
+  ["look", "Appearance", ICONS.palette, "look style pill notch bubble space gap top open hover click animation motion move screen monitor slide fade pop material glass frosted translucent black rest time clock dot pet accent color colour white green preview"],
+  ["behavior", "Behavior", ICONS.gear, "start windows startup login hide mouse near tuck idle away fullscreen full-screen video youtube browser chrome edge firefox maximized apps click through ctrl screenshots recording sharing"],
+  ["features", "Features", ICONS.apps, [...FEATURES, ...PRESETS].map((f) => `${f[1]} ${f[2]}`).join(" ") + ` ${Object.values(GROUPS).join(" ")} lyrics lrclib sets presets all`],
   ["tabs", "Tab order", ICONS.tabs, "tabs order now recent focus agents to do todo tools"],
   ["shortcuts", "Shortcuts", ICONS.calculator, "shortcuts buttons beside left right " + Object.values(SHORTCUTS).join(" ")],
   ["focus", "Focus timer", ICONS.timer, "pomodoro focus break long rounds minutes automatically stopwatch timer"],
@@ -73,11 +74,38 @@ function Switch(p: { label: string; help?: React.ReactNode; checked: boolean; on
   );
 }
 
+/** How many of a list are on, as a thin bar. The count beside it is the text version. */
+const Bar = ({ n, of }: { n: number; of: number }) => (
+  <span className="bar" aria-hidden="true">
+    <span style={{ width: `${(100 * n) / of}%` }} />
+  </span>
+);
+
 const Chevron = ({ up }: { up?: boolean }) => (
   <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
     <path d={up ? "M4 10l4-4 4 4" : "M4 6l4 4 4-4"} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+/** The island at rest, drawn as the choices below set it, over half a picture and half a white
+ *  window. Play runs the move to another screen. */
+function Preview({ style, prefs, pet }: { style: string; prefs: Prefs; pet: boolean }) {
+  const [run, setRun] = useState(0);
+  const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const bubble = style === "bubble";
+  return (
+    <div className="preview" style={{ "--accent": accentOf(prefs.accent) } as React.CSSProperties}>
+      <div key={run} className={`pv-pill ${style} m-${prefs.material}${run ? ` pv-${prefs.move}` : ""}`} aria-label="Preview of the island" role="img">
+        {!bubble && <span className="pv-slot">{pet && <Pet mood="idle" />}</span>}
+        {!bubble && <span className="pv-time">{prefs.showTime ? time : ""}</span>}
+        <span className="pv-slot">{prefs.showDot && <span className="pv-dot" />}</span>
+      </div>
+      <button className="pv-play" onClick={() => setRun((n) => n + 1)}>
+        <Icon d={ICONS.play} size={12} /> Play the move
+      </button>
+    </div>
+  );
+}
 
 export default function Settings() {
   const [saved, setSaved] = useState<Saved>(EMPTY_SETTINGS);
@@ -104,10 +132,19 @@ export default function Settings() {
     setSaved((s) => ({ ...s, ui }));
     invoke("set_prefs", { ui });
   };
-  const setFeature = (f: string, on: boolean) => {
-    const off = on ? saved.off.filter((x) => x !== f) : [...saved.off, f];
+  // The switches before the last bulk change (a set, all on, all off), for its Undo.
+  const [undo, setUndo] = useState<string[] | null>(null);
+  const saveOff = (off: string[]) => {
     setSaved((s) => ({ ...s, off }));
     invoke("set_prefs", { off });
+  };
+  const setFeature = (f: string, on: boolean) => {
+    setUndo(null);
+    saveOff(on ? saved.off.filter((x) => x !== f) : [...saved.off, f]);
+  };
+  const setAll = (off: string[]) => {
+    setUndo(saved.off);
+    saveOff(off);
   };
   const setShortcut = (side: "left" | "right", slot: number, target: string) => {
     const list = [...prefs[side]];
@@ -182,14 +219,30 @@ export default function Settings() {
   const shown = found.some((p) => p[0] === page) ? page : found[0]?.[0];
   const title = PAGES.find((p) => p[0] === shown)?.[1];
 
+  const onCount = FEATURES.filter((f) => !saved.off.includes(f[0])).length;
   const pages: Record<Page, React.ReactNode> = {
     look: (
       <>
+        <Preview style={style} prefs={prefs} pet={!saved.off.includes("pet")} />
         <div className="looks" role="radiogroup" aria-label="Look">
           {STYLES.map(([id, label, help]) => (
             <label key={id} className={`look${style === id ? " on" : ""}`}>
               <input type="radio" name="style" className="sr" checked={style === id} onChange={() => setWindow({ style: id }, { style: id })} />
               <span className={`look-art ${id}`} aria-hidden="true">
+                <span />
+              </span>
+              <span className="item-label">{label}</span>
+              <span className="item-help">{help}</span>
+            </label>
+          ))}
+        </div>
+        <h3 className="group-title">Material</h3>
+        {/* Each over a busy and a white backdrop: see-through looks differ most between the two. */}
+        <div className="looks" role="radiogroup" aria-label="Material">
+          {MATERIALS.map(([id, label, help]) => (
+            <label key={id} className={`look${prefs.material === id ? " on" : ""}`}>
+              <input type="radio" name="material" className="sr" checked={prefs.material === id} onChange={() => savePrefs({ material: id })} />
+              <span className={`look-art mat-art ${style} m-${id}`} aria-hidden="true">
                 <span />
               </span>
               <span className="item-label">{label}</span>
@@ -219,6 +272,49 @@ export default function Settings() {
               ))}
             </div>
           </Row>
+          <Row
+            label="At rest, show"
+            help={
+              prefs.showTime || prefs.showDot || !saved.off.includes("pet")
+                ? "Music, a muted mic and alerts show either way"
+                : "Plain black. Music, a muted mic and alerts show either way"
+            }
+          >
+            <div className="seg multi" role="group" aria-label="At rest, show">
+              {(
+                [
+                  ["Time", prefs.showTime, (on: boolean) => savePrefs({ showTime: on })],
+                  ["Dot", prefs.showDot, (on: boolean) => savePrefs({ showDot: on })],
+                  ["Pet", !saved.off.includes("pet"), (on: boolean) => setFeature("pet", on)],
+                ] as const
+              ).map(([label, on, set]) => (
+                <label key={label} className={on ? "on" : ""}>
+                  <input type="checkbox" className="sr" checked={on} onChange={(e) => set(e.target.checked)} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </Row>
+          <Row label="Accent" help="The dot, switches and buttons in the island">
+            <div className="swatches" role="radiogroup" aria-label="Accent">
+              {ACCENTS.map(([id, label, color]) => (
+                <label key={id} className={prefs.accent === id ? "on" : ""} title={label}>
+                  <input type="radio" name="accent" className="sr" checked={prefs.accent === id} onChange={() => savePrefs({ accent: id })} aria-label={label} />
+                  <span style={{ background: color }} />
+                </label>
+              ))}
+            </div>
+          </Row>
+          <Row label="Moving to another screen" help="How the island follows the mouse to another screen">
+            <div className="seg" role="radiogroup" aria-label="Moving to another screen">
+              {MOVES.map(([id, label]) => (
+                <label key={id} className={prefs.move === id ? "on" : ""}>
+                  <input type="radio" name="move" className="sr" checked={prefs.move === id} onChange={() => savePrefs({ move: id })} />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </Row>
         </div>
       </>
     ),
@@ -238,9 +334,17 @@ export default function Settings() {
           checked={!!saved.auto_hide}
           onChange={(on) => setWindow({ auto_hide: on }, { autoHide: on })}
         />
+        {!saved.auto_hide && (
+          <Switch
+            label="Tuck away when idle"
+            help="After a minute without the mouse on it, it slides into the top edge until you point at it. Alerts still come out."
+            checked={prefs.idleTuck}
+            onChange={(on) => savePrefs({ idleTuck: on })}
+          />
+        )}
         <Switch
           label="Hide over full-screen videos"
-          help="And other full-screen apps. Off, it tucks into the top edge over them instead. Ctrl+Alt+Space still brings it out."
+          help="And other full-screen apps. Off, it tucks into the top edge over them instead. It always hides during a slideshow. Either way, Ctrl+Alt+Space brings it out."
           checked={!!saved.hide_fullscreen}
           onChange={(on) => setWindow({ hide_fullscreen: on }, { hideFullscreen: on })}
         />
@@ -290,35 +394,84 @@ export default function Settings() {
       <>
         <p className="help">Turning one off removes it from the island right away. Its background work stops the next time Pulo starts.</p>
         <div className="card">
-          {FEATURES.map(([id, label, help]) => (
-            <Fragment key={id}>
-              <Switch
-                label={label}
-                help={
-                  <>
-                    {help}
-                    {id === "hotkey" && !hotkeyOk && <span className="warn"> Another app is using this shortcut, so it won't work until that app lets go of it and Pulo restarts.</span>}
-                  </>
-                }
-                checked={!saved.off.includes(id)}
-                onChange={(on) => setFeature(id, on)}
-              />
-              {id === "media" && (
-                <Switch
-                  sub
-                  label="Show synced lyrics"
-                  help="Looks up each song on lrclib.net, which receives its title, artist and length. Nothing else is sent."
-                  checked={saved.lyrics}
-                  disabled={saved.off.includes("media")}
-                  onChange={(on) => {
-                    setSaved((s) => ({ ...s, lyrics: on }));
-                    invoke("set_lyrics", { on });
+          <Row label={`${onCount} of ${FEATURES.length} on`} help={<Bar n={onCount} of={FEATURES.length} />}>
+            <span className="buttons">
+              {undo && (
+                <button type="button" onClick={() => {
+                    saveOff(undo);
+                    setUndo(null);
                   }}
-                />
+                >
+                  Undo
+                </button>
               )}
-            </Fragment>
-          ))}
+              <button type="button" disabled={onCount === FEATURES.length} onClick={() => setAll([])}>
+                Turn all on
+              </button>
+              <button type="button" disabled={onCount === 0} onClick={() => setAll(FEATURES.map((f) => f[0]))}>
+                Turn all off
+              </button>
+            </span>
+          </Row>
         </div>
+        <h3 className="group-title">Start from a set</h3>
+        <div className="looks">
+          {PRESETS.map(([id, label, help, on]) => {
+            const off = FEATURES.map((f) => f[0]).filter((f) => !on.includes(f));
+            const current = off.length === saved.off.length && off.every((f) => saved.off.includes(f));
+            return (
+              <button key={id} type="button" className={`look preset${current ? " on" : ""}`} aria-pressed={current} onClick={() => setAll(off)}>
+                <span className="item-label">{label}</span>
+                <span className="item-help">{help}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="help">A set turns on what it lists and turns off the rest. Every feature stays a switch away below.</p>
+        {Object.entries(GROUPS).map(([group, name]) => {
+          const list = FEATURES.filter((f) => f[3] === group);
+          const n = list.filter((f) => !saved.off.includes(f[0])).length;
+          return (
+            <div key={group} className="card">
+              <div className="item group-head">
+                <span className="item-label">{name}</span>
+                <span className="count">
+                  {n}/{list.length}
+                </span>
+                <Bar n={n} of={list.length} />
+              </div>
+              {list.map(([id, label, help, , cost]) => (
+                <Fragment key={id}>
+                  <Switch
+                    label={label}
+                    help={
+                      <>
+                        {help}
+                        {id === "hotkey" && !hotkeyOk && <span className="warn"> Another app is using this shortcut, so it won't work until that app lets go of it and Pulo restarts.</span>}
+                        <span className="cost">{COST[cost]}</span>
+                      </>
+                    }
+                    checked={!saved.off.includes(id)}
+                    onChange={(on) => setFeature(id, on)}
+                  />
+                  {id === "media" && (
+                    <Switch
+                      sub
+                      label="Show synced lyrics"
+                      help="Looks up each song on lrclib.net, which receives its title, artist and length. Nothing else is sent."
+                      checked={saved.lyrics}
+                      disabled={saved.off.includes("media")}
+                      onChange={(on) => {
+                        setSaved((s) => ({ ...s, lyrics: on }));
+                        invoke("set_lyrics", { on });
+                      }}
+                    />
+                  )}
+                </Fragment>
+              ))}
+            </div>
+          );
+        })}
       </>
     ),
     tabs: (

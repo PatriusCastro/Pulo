@@ -8,6 +8,34 @@
   /* One knob for how fast the island grows, shrinks and crossfades: 1 = the original timing. */
   --pace: 1.4;
   --feather: 0 0 1.5px 0.5px rgba(0, 0, 0, 0.6);
+  /* The island's surface: black, or see-through for Glass and Frosted (.mat-*). */
+  --surface: #000;
+  --sheen: none;
+}
+/* Glass: clear and dark, with a light rim, like glass catching the light. */
+.mat-glass {
+  --surface: rgba(14, 14, 16, 0.6); /* any clearer and white text fades over white windows */
+  /* Light from above and a little shade below give it depth: over a white window, a flat
+     tint read as a grey pill rather than glass. */
+  --sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.18), transparent 45%, rgba(0, 0, 0, 0.14));
+  --rim: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --dim: rgba(245, 245, 245, 0.78); /* .55 read as grey on grey over white windows */
+}
+/* Frosted: fewer details show through, softened by a fine grain. No real blur: Windows would
+   blur a box the size of the open island while the pill animates inside it. */
+.mat-frosted {
+  --surface: rgba(30, 30, 34, 0.84);
+  --sheen: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  --rim: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --dim: rgba(245, 245, 245, 0.7);
+}
+.mat-glass .pill:not(.tinted),
+.mat-frosted .pill:not(.tinted),
+.mat-glass .shortcut,
+.mat-frosted .shortcut {
+  background-image: var(--sheen);
+  box-shadow: var(--rim), var(--feather);
 }
 
 html,
@@ -83,12 +111,12 @@ button:focus-visible {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: #000;
+  background-color: var(--surface);
   color: var(--fg);
   box-shadow: var(--feather);
 }
 .shortcut:hover {
-  background: #1c1c1e;
+  background-color: color-mix(in srgb, var(--surface), #fff 11%);
 }
 .shortcut:focus-visible {
   outline: 2px solid var(--accent);
@@ -104,7 +132,7 @@ button:focus-visible {
   width: 200px;
   height: 36px;
   border-radius: 18px;
-  background: #000;
+  background-color: var(--surface);
   overflow: hidden;
   /* Fades the edge over a couple of pixels instead of one, so it reads smooth even at
      100% scaling. Stays inside the 2 px margin the window region leaves (apply_region). */
@@ -122,6 +150,74 @@ button:focus-visible {
 }
 .tucked.rest > .ears {
   transform: translate(-50%, -100%);
+}
+/* Moving to another screen: up out of sight quickly (MOVE_OUT_MS in lib.rs), then down on the
+   new screen (.arriving, App.tsx). */
+/* Size keeps animating too: an open island closes as it moves (App.tsx). */
+.island.moving > .pill,
+.island.moving > .ears {
+  transition:
+    transform 0.1s ease-in,
+    opacity 0.1s ease-in,
+    width 0.1s ease-in,
+    height 0.1s ease-in,
+    border-radius 0.1s ease-in;
+}
+.island.arriving > .pill,
+.island.arriving > .ears {
+  transition:
+    transform 0.24s var(--morph),
+    opacity 0.24s ease-out,
+    width 0.24s var(--morph),
+    height 0.24s var(--morph),
+    border-radius 0.24s var(--morph);
+}
+/* Slide: up into the top edge and down again. */
+.island.moving.move-slide > .pill,
+.island.moving.move-slide > .ears {
+  transform: translate(-50%, calc(-100% - 4px));
+}
+/* Fade: out and back in, in place. */
+.island.moving.move-fade > .pill,
+.island.moving.move-fade > .ears {
+  opacity: 0;
+}
+/* Pop: shrinks away, then grows back. No overshoot: at rest the window is clipped to the
+   pill (apply_region), so anything bigger gets cut. */
+.island.moving.move-pop > .pill,
+.island.moving.move-pop > .ears {
+  transform: translate(-50%, var(--drop, 0px)) scale(0.5);
+  opacity: 0;
+}
+.island.arriving.move-pop > .pill,
+.island.arriving.move-pop > .ears {
+  transition:
+    transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1),
+    opacity 0.16s ease-out,
+    width 0.24s var(--morph),
+    height 0.24s var(--morph),
+    border-radius 0.24s var(--morph);
+}
+.island.moving > .side {
+  opacity: 0;
+  transition-duration: 0.1s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .island.moving > .pill,
+  .island.moving > .ears,
+  .island.arriving > .pill,
+  .island.arriving > .ears {
+    transition: none;
+  }
+}
+/* A heads-up at rest (WIDE in App.tsx): the pill stretches out sideways, then the heads-up
+   fades in once there's room (.wide .hud). */
+.wide.rest > .pill,
+.wide.rest .mini-layer {
+  width: 280px;
+}
+.wide.rest > .ears {
+  width: 296px;
 }
 /* Hovering: wider, same height. Quicker than opening, it should feel like a nudge. */
 .pill.peek {
@@ -148,7 +244,7 @@ button:focus-visible {
   transform: translateX(-50%);
   width: 216px; /* the pill plus an ear each side */
   height: 8px;
-  color: #000;
+  color: var(--surface);
   /* Each tile reaches 2 px into the pill, solid there: ending exactly on the pill's soft,
      feathered edge left a faint light seam between the two at 150%. */
   background:
@@ -161,6 +257,13 @@ button:focus-visible {
 }
 .ears.tinted {
   color: var(--tint);
+}
+/* See-through, the 2 px overlap would be doubled up into darker bands: end at the pill. */
+.mat-glass .ears,
+.mat-frosted .ears {
+  background:
+    radial-gradient(circle at 0 100%, transparent 7.5px, currentColor 8.5px) left / 8px 8px no-repeat,
+    radial-gradient(circle at 100% 100%, transparent 7.5px, currentColor 8.5px) right / 8px 8px no-repeat;
 }
 .peek > .ears {
   width: 376px;
@@ -280,6 +383,22 @@ button:focus-visible {
   display: flex;
   justify-content: center;
 }
+/* Camera or mic in use: a dot in the pill's top-right corner, out of the slots' way. */
+.live-light {
+  position: absolute;
+  top: 4px;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff9f0a;
+}
+.live-light.on-cam {
+  background: #30d158;
+}
+.bubble .mini > .live-light {
+  display: block;
+}
 .dot {
   width: 8px;
   height: 8px;
@@ -325,6 +444,10 @@ button:focus-visible {
   padding: 0 14px;
   justify-content: center;
   animation: pop 0.2s var(--morph);
+}
+/* At rest, after the pill has mostly stretched (.wide.rest > .pill). */
+.wide.rest .hud {
+  animation: pop 0.24s var(--morph) calc(0.14s * var(--pace)) backwards;
 }
 @keyframes pop {
   from {
@@ -532,6 +655,15 @@ button:focus-visible {
   color: var(--accent);
 }
 /* "Also playing": a second player; click to show it instead. */
+/* With another player's line too, the card, the four switches and the bar only just fit:
+   tighten the card's rows and the space above the switches. */
+.player:has(.also) {
+  gap: 3px;
+  padding-bottom: 2px;
+}
+.player:has(.also) ~ .quick {
+  margin-top: 0;
+}
 .also {
   justify-content: space-between;
   gap: 8px;
@@ -685,7 +817,7 @@ button:focus-visible {
 }
 /* The cover's colour behind the music page, fading to the island's black at the bottom. */
 .pill {
-  background-color: #000;
+  background-color: var(--surface);
   transition:
     width calc(0.34s * var(--pace)) var(--morph),
     height calc(0.34s * var(--pace)) var(--morph),
@@ -841,6 +973,34 @@ button:focus-visible {
     transform calc(0.3s * var(--pace)) var(--morph),
     width calc(0.3s * var(--pace)) var(--morph);
 }
+/* Update now: an accent pill after the tabs while an update is ready (App.tsx). The tabs
+   pull together to make room for it beside all six. */
+.tabs:has(.update-now) {
+  gap: 0;
+}
+.tabs:has(.update-now) .tab {
+  padding-inline: 7px;
+}
+.update-now {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #08130c;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.update-now:hover {
+  background: color-mix(in srgb, var(--accent) 85%, white);
+}
+.update-now:disabled {
+  opacity: 0.6;
+}
 .tab-body {
   flex: 1;
   min-height: 0;
@@ -901,6 +1061,103 @@ button:focus-visible {
 }
 .pomo-time.paused {
   opacity: 0.5;
+}
+/* Numbers you can type (NumInput, extras.tsx): plain until pointed at or edited. */
+.num {
+  box-sizing: content-box;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: center;
+  outline: none;
+  cursor: text;
+  transition: background-color 0.15s ease;
+}
+.num:hover {
+  background: var(--chip);
+}
+.num:focus {
+  background: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.num.time-edit {
+  padding: 0 4px;
+  border-radius: 10px;
+  text-align: right;
+}
+/* Pomodoro lengths, edited in place: four fields in a row, each a label over − n + . */
+.pomo-head-end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pomo-edit-btn {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--fg);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.pomo-edit-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.pomo-edit-btn.on {
+  background: var(--accent);
+  color: #000;
+}
+.pomo-edit {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  animation: center-in 0.2s ease;
+}
+.pomo-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 11px;
+  color: var(--dim);
+}
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg);
+}
+.stepper button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--dim);
+  font-size: 15px;
+  line-height: 1;
+}
+.stepper button:hover {
+  background: var(--chip);
+  color: var(--fg);
+}
+.stepper button:disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+.stepper .num {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stepper-unit {
+  font-size: 11px;
+  color: var(--dim);
 }
 .pomo-hint {
   margin-top: 6px;
@@ -1151,7 +1408,7 @@ button.recent-main:hover .recent-text {
 }
 .badge.k-download,
 .badge.k-focus {
-  background: rgba(61, 220, 132, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
 }
 .badge.k-agent {
@@ -1184,6 +1441,36 @@ button.recent-main:hover .recent-text {
 .recent-row:hover .recent-time,
 .recent-row:has(.recent-x:focus-visible) .recent-time {
   visibility: hidden;
+}
+/* Clear: each row slides off to the right and fades, top first, 25 ms apart (up to 8 steps,
+   so 0.22 + 0.2 s fits CLEAR_MS in App.tsx). */
+.recent-list.clearing > * {
+  animation: recent-out 0.22s cubic-bezier(0.4, 0, 1, 1) calc(var(--i, 0) * 25ms) forwards;
+  pointer-events: none;
+}
+@keyframes recent-out {
+  to {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+}
+/* Removing one row: the same slide, then it folds shut so the rows below glide up
+   (LEAVE_MS in App.tsx). */
+.recent-row.leaving {
+  animation:
+    recent-out 0.2s cubic-bezier(0.4, 0, 1, 1) forwards,
+    recent-fold 0.16s var(--morph) 0.14s forwards;
+  pointer-events: none;
+}
+@keyframes recent-fold {
+  to {
+    height: 0;
+    margin-bottom: -2px; /* the list's gap too */
+  }
+}
+/* Then the empty note settles in. */
+.recent-list > .empty-note {
+  animation: center-in 0.3s ease;
 }
 .recent-day {
   flex: none;
@@ -1229,9 +1516,201 @@ button.bar:hover {
 .tile:hover {
   background: rgba(255, 255, 255, 0.16);
 }
+/* Tapping a tile: its icon does one short move of its own (.tile-ico.play, App.tsx). One-shot
+   on purpose: a looping animation keeps the window redrawing. */
+.tile {
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.tile-ico {
+  display: inline-flex;
+}
+.tile-ico.play {
+  animation: tile-pop 0.36s var(--morph);
+}
+/* Wi-Fi: the arcs spread out going on, sink going off. */
+.tile-ico.play[data-tool="wifi"].to-on {
+  animation: tile-radiate 0.45s var(--morph);
+}
+.tile-ico.play[data-tool="wifi"].to-off,
+.tile-ico.play[data-tool="bluetooth"].to-off {
+  animation: tile-sink 0.36s var(--morph);
+}
+/* Bluetooth: a quick zig-zag, like a signal. */
+.tile-ico.play[data-tool="bluetooth"].to-on {
+  animation: tile-zap 0.4s ease;
+}
+/* Dark mode: the moon swings round; back to light, it spins the other way. */
+.tile-ico.play[data-tool="dark"].to-on {
+  animation: tile-swing 0.5s var(--morph);
+}
+.tile-ico.play[data-tool="dark"].to-off {
+  animation: tile-swing 0.5s var(--morph) reverse;
+}
+/* Mic: muting gives a little shake no, unmuting a hop. */
+.tile-ico.play[data-tool="mic"].to-on {
+  animation: tile-shake 0.36s ease;
+}
+.tile-ico.play[data-tool="mic"].to-off {
+  animation: tile-hop 0.4s var(--morph);
+}
+/* Keep awake: the cup lifts for a sip. */
+.tile-ico.play[data-tool="awake"] {
+  animation: tile-sip 0.5s var(--morph);
+}
+/* The rest: a turn for the dials, a tilt for the tools, a drop for the lock. */
+.tile-ico.play[data-tool="display"] {
+  animation: tile-turn 0.5s var(--morph);
+}
+.tile-ico.play[data-tool="color"],
+.tile-ico.play[data-tool="scratchpad"] {
+  animation: tile-tilt 0.4s var(--morph);
+}
+.tile-ico.play[data-tool="lock"] {
+  animation: tile-clasp 0.36s var(--morph);
+}
+.tile-ico.play[data-tool="empty_bin"] {
+  animation: tile-shake 0.4s ease;
+}
+@keyframes tile-pop {
+  40% {
+    transform: scale(0.8);
+  }
+  75% {
+    transform: scale(1.12);
+  }
+}
+@keyframes tile-radiate {
+  from {
+    transform: scale(0.5);
+    opacity: 0.3;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+@keyframes tile-sink {
+  45% {
+    transform: translateY(3px) scale(0.85);
+    opacity: 0.5;
+  }
+}
+@keyframes tile-zap {
+  25% {
+    transform: translateX(-2px) rotate(-12deg);
+  }
+  50% {
+    transform: translateX(2px) rotate(10deg);
+  }
+  75% {
+    transform: rotate(-5deg);
+  }
+}
+@keyframes tile-swing {
+  from {
+    transform: rotate(-120deg) scale(0.7);
+  }
+  70% {
+    transform: rotate(12deg) scale(1.05);
+  }
+}
+@keyframes tile-shake {
+  20%,
+  60% {
+    transform: translateX(-2px);
+  }
+  40%,
+  80% {
+    transform: translateX(2px);
+  }
+}
+@keyframes tile-hop {
+  40% {
+    transform: translateY(-4px);
+  }
+  70% {
+    transform: translateY(1px);
+  }
+}
+@keyframes tile-sip {
+  45% {
+    transform: translateY(-3px) rotate(-14deg);
+  }
+}
+@keyframes tile-turn {
+  from {
+    transform: rotate(-90deg);
+  }
+}
+@keyframes tile-tilt {
+  40% {
+    transform: rotate(-16deg) scale(1.08);
+  }
+}
+@keyframes tile-clasp {
+  from {
+    transform: translateY(-4px);
+  }
+  60% {
+    transform: translateY(1px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-ico.play {
+    animation: none !important;
+  }
+}
+/* Now: four switches from Tools in a row of chips, between the song (or clock) and the bar. */
+.quick {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.quick-btn {
+  height: 28px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 14px;
+  background: var(--chip);
+  font-size: 11px;
+  white-space: nowrap;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+.quick-btn > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.quick-btn.on {
+  background: var(--accent);
+  color: #000;
+}
+.quick-btn.on:hover {
+  background: color-mix(in srgb, var(--accent) 85%, black);
+}
+.quick-btn.warn {
+  background: rgba(255, 107, 94, 0.2);
+  color: #ff6b5e;
+}
+/* Solid, so on reads apart from off in any accent (a white tint barely shows on the chip). */
 .tile.on {
-  background: rgba(61, 220, 132, 0.2);
-  color: var(--accent);
+  background: var(--accent);
+  color: #000;
+}
+.tile.on:hover {
+  background: color-mix(in srgb, var(--accent) 85%, black);
 }
 .tile.warn {
   background: rgba(255, 107, 94, 0.2);

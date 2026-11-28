@@ -194,7 +194,12 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
     case "devices":
       return [{ name: "Buds", percent: 64, kind: "headphones" }, { name: "Mouse", percent: 41, kind: "mouse" }];
     case "get_settings":
-      return { calendar_url: "demo", lyrics: true, off: [], ui: {} };
+      return settings;
+    case "set_prefs":
+      // As Rust does: keep it, and tell the island (the Focus tab's lengths come back this way).
+      settings = { ...settings, ...(args.ui ? { ui: args.ui } : {}), ...(args.off ? { off: args.off } : {}) };
+      emit("settings", settings);
+      return null;
     case "clip_history":
       return [
         { id: "1", text: "https://github.com/PatriusCastro/pulo", image: false, at: Date.now() - 40_000 },
@@ -218,11 +223,14 @@ export async function invoke(cmd: string, args: Record<string, unknown> = {}): P
   }
 }
 
+// Settings for this visit only, like the app's settings.json.
+let settings: { calendar_url: string; lyrics: boolean; off: unknown; ui: unknown } = { calendar_url: "demo", lyrics: true, off: [], ui: {} };
+
 const started = Date.now();
 let agentDone = 0; // when the working session finished; 0 while it works
 const agents = () => ({
-  sessions: [{ agent: "claude", title: "Make the island follow the mouse", project: "pulo", working: !agentDone, since: started - 260_000, last: agentDone || Date.now(), model: "opus" },
-    { agent: "claude", title: "Write the release notes", project: "pulo", working: false, since: started - 3_600_000, last: started - 1_500_000, model: "claude-sonnet-5-5" },
+  sessions: [{ agent: "Claude", title: "Make the island follow the mouse", project: "pulo", working: !agentDone, since: started - 260_000, last: agentDone || Date.now(), model: "opus" },
+    { agent: "Claude", title: "Write the release notes", project: "pulo", working: false, since: started - 3_600_000, last: started - 1_500_000, model: "claude-sonnet-5-5" },
   ],
   tokens_today: agentDone ? 191_800 : 184_200,
 });

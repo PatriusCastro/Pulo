@@ -54,9 +54,20 @@ static AUTO_HIDE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 const TUCK_SHOW: f64 = 4.0;
 const NEAR: f64 = 12.0;
 
+/// Untouched for a while with "Tuck away when idle" on: set by the island (set_idle).
+static IDLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn tucked() -> bool {
     use std::sync::atomic::Ordering::Relaxed;
-    TUCKED.load(Relaxed) || AUTO_HIDE.load(Relaxed)
+    TUCKED.load(Relaxed) || AUTO_HIDE.load(Relaxed) || IDLE.load(Relaxed)
+}
+
+#[tauri::command]
+fn set_idle(window: WebviewWindow, idle: bool) {
+    if IDLE.swap(idle, std::sync::atomic::Ordering::Relaxed) != idle {
+        place(&window);
+        apply_region(&window, window.scale_factor().unwrap_or(1.0));
+    }
 }
 
 /// What's drawn and clickable: the pill at its current size, plus the shortcut buttons
@@ -72,6 +83,11 @@ struct Region {
 static REGION: Mutex<Region> = Mutex::new(Region { w: 200.0, h: 36.0, left: 0, right: 0, out: false });
 
 /// Long-lived background thread with a name (shows up in profilers and debuggers).
+/// How long the pill takes to slide out of sight before moving screens (.moving in island.css).
+const MOVE_OUT_MS: u64 = 100;
+/// Set while it slides out, so the tick doesn't move the window mid-slide.
+static MOVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn named(name: &str, f: impl FnOnce() + Send + 'static) {
     let _ = thread::Builder::new().name(name.into()).spawn(f);
 }
@@ -196,6 +212,20 @@ fn keep_transparent(w: &WebviewWindow) {
         let _ = DwmEnableBlurBehindWindow(hwnd(w), &bb);
         let _ = windows::Win32::Graphics::Gdi::DeleteObject(empty.into());
     }
+}
+
+/// The screen the mouse is on, and the one the island is on (as handles to compare).
+fn cursor_monitor() -> isize {
+    use windows::Win32::Graphics::Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY};
+    let mut c = Default::default();
+    unsafe {
+        let _ = GetCursorPos(&mut c);
+        MonitorFromPoint(c, MONITOR_DEFAULTTOPRIMARY).0 as isize
+    }
+}
+fn window_monitor(w: &WebviewWindow) -> isize {
+    use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTOPRIMARY};
+    unsafe { MonitorFromWindow(hwnd(w), MONITOR_DEFAULTTOPRIMARY).0 as isize }
 }
 
 /// Where the island belongs: top center of the screen the mouse is on, sized for that
@@ -519,9 +549,14 @@ struct Settings {
 // ---------- click-through and screenshots ----------
 
 static CLICK_THROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// How far click-through fades the island while the mouse is over it (alpha out of 255).
+/// Glass and Frosted are see-through already: faded as far as black, they all but vanish.
+static FADE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(51);
 
 fn apply_window_settings(app: &AppHandle, s: &Settings) {
     CLICK_THROUGH.store(s.click_through, std::sync::atomic::Ordering::Relaxed);
+    let clear = matches!(s.ui["material"].as_str(), Some("glass" | "frosted")); // Prefs in prefs.ts
+    FADE.store(if clear { 140 } else { 51 }, std::sync::atomic::Ordering::Relaxed);
     TOP_GAP.store(s.top_gap.unwrap_or(6).min(40), std::sync::atomic::Ordering::Relaxed); // place() moves it
     NOTCH.store(s.style == "notch", std::sync::atomic::Ordering::Relaxed);
     AUTO_HIDE.store(s.auto_hide, std::sync::atomic::Ordering::Relaxed);
@@ -596,13 +631,13 @@ fn watch_click_through(w: WebviewWindow) {
             through = t;
             let _ = w.emit("passthrough", t); // no mouseleave arrives once clicks pass through
         }
-        // The window's opacity: faded to 20% while the mouse is over it, to see what's under it.
+        // The window's opacity: faded (FADE) while the mouse is over it, to see what's under it.
         // Faded here, not with CSS opacity in the page: that let whatever was behind the page
         // show through, white at times. Also, a layered window draws nothing (Pulo vanishes)
         // until it has an opacity, and tao makes it layered without one. So check every tick.
         unsafe {
             let h = hwnd(&w);
-            let want = if t && over { 51u8 } else { 255 };
+            let want = if t && over { FADE.load(std::sync::atomic::Ordering::Relaxed) } else { 255 };
             let mut alpha = 0u8;
             if GetWindowLongPtrW(h, GWL_EXSTYLE) & WS_EX_LAYERED.0 as isize != 0
                 && (GetLayeredWindowAttributes(h, None, Some(&mut alpha), None).is_err() || alpha != want)
@@ -768,19 +803,31 @@ fn open_settings(app: &AppHandle) {
 fn open_window(app: &AppHandle, label: &'static str, title: &'static str, (w, h): (f64, f64), resizable: bool) {
     if let Some(win) = app.get_webview_window(label) {
         let _ = win.unminimize();
-        let _ = win.set_focus();
+        to_front(&win);
         return;
     }
     // Built off the event-loop thread: creating a webview inside a menu callback can deadlock.
     let app = app.clone();
     thread::spawn(move || {
-        let _ = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(format!("index.html#{label}").into()))
+        if let Ok(win) = WebviewWindowBuilder::new(&app, label, WebviewUrl::App(format!("index.html#{label}").into()))
             .title(title)
             .inner_size(w, h)
             .resizable(resizable)
             .center()
-            .build();
+            .build()
+        {
+            to_front(&win);
+        }
     });
+}
+
+/// Windows only lets the app in front bring a window forward, and the island never takes
+/// focus, so a window opened from it lands behind the others. On top for a moment lifts it
+/// above them anyway; then it's an ordinary window again.
+fn to_front(win: &WebviewWindow) {
+    let _ = win.set_always_on_top(true);
+    let _ = win.set_focus();
+    let _ = win.set_always_on_top(false);
 }
 
 // ---------- autostart (HKCU Run key) ----------
@@ -889,12 +936,18 @@ fn hidden_by_rule(w: &WebviewWindow, busy: bool) -> bool {
     if now < SNOOZE_UNTIL.load(Relaxed) {
         return true;
     }
+    // A slideshow is on an audience's screen: hidden whatever the settings (as Windows holds
+    // back notifications then). Only the shortcut, above, brings it out.
+    if matches!(unsafe { SHQueryUserNotificationState() }, Ok(QUNS_PRESENTATION_MODE)) {
+        return true;
+    }
     // Never out from under the mouse: a click through the island brings the app below it to
     // the front (often a maximized one), which would make it vanish as you click. The 1 s tick
     // applies the rule once the mouse moves away.
     if !*HIDDEN.lock().unwrap() && over_pill(w, *REGION.lock().unwrap()) {
         return false;
     }
+    // Only with Hide over full-screen videos on; off, the island tucks into the top edge.
     if busy && HIDE_FULLSCREEN.load(Relaxed) {
         return true;
     }
@@ -914,14 +967,29 @@ fn hidden_by_rule(w: &WebviewWindow, busy: bool) -> bool {
 /// Show or hide the island: hidden over fullscreen apps and wherever a hide rule says.
 /// Called each second (tick) and the moment another window comes to the front.
 fn update_visibility(w: &WebviewWindow) {
-    let (exclusive, busy) = fullscreen_app();
-    let hide = exclusive || hidden_by_rule(w, busy);
+    let busy = fullscreen_app();
+    let hide = hidden_by_rule(w, busy);
     let mut hidden = HIDDEN.lock().unwrap();
     if hide != *hidden {
         *hidden = hide;
         // Through tao, so it knows: shown behind its back, its next style rebuild hid the
         // island again. Not focusable, so showing doesn't activate it.
         let _ = if hide { w.hide() } else { w.show() };
+    }
+    drop(hidden); // never hold it into SetWindowPos: the main thread also takes it (set_prefs)
+    // A full-screen app that is itself always-on-top (games, some players) lands above the
+    // island when it comes to the front, so put the island back on top of the pile. Once per
+    // app coming to the front, not every tick: fighting an exclusive-mode game for the top
+    // each second can make it stutter or minimize.
+    static LAST_FG: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+    let fg = unsafe { GetForegroundWindow() }.0 as isize;
+    if !hide && busy && LAST_FG.swap(fg, std::sync::atomic::Ordering::Relaxed) != fg {
+        unsafe {
+            // Async: doesn't wait on the window's thread, which may be the caller's.
+            let _ = SetWindowPos(hwnd(w), Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        }
+    } else if !busy {
+        LAST_FG.store(0, std::sync::atomic::Ordering::Relaxed); // next full-screen app re-asserts
     }
 }
 
@@ -954,11 +1022,43 @@ fn watch_foreground() {
 /// The app that was in front when the quick menu opened (exe, name): its "Over …" item.
 static MENU_APP: Mutex<Option<HiddenApp>> = Mutex::new(None);
 
-fn fullscreen_app() -> (bool, bool) {
-    match unsafe { SHQueryUserNotificationState() } {
-        Ok(QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE) => (true, false),
-        Ok(QUNS_BUSY) => (false, true),
-        _ => (false, false),
+/// A full-screen app is running: a video, a game, a slideshow. The island tucks over it, or
+/// hides when Hide over full-screen videos is on. (It used to hide over games whatever the
+/// setting said.) Slideshows always hide it (update_visibility).
+fn fullscreen_app() -> bool {
+    matches!(
+        unsafe { SHQueryUserNotificationState() },
+        Ok(QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE | QUNS_BUSY)
+    ) || covers_screen(unsafe { GetForegroundWindow() })
+}
+
+/// The window covers its whole screen, taskbar included: a browser's full-screen video
+/// (YouTube's ⛶, F11), which Windows often doesn't report as full screen. Not a maximized
+/// window (that leaves the taskbar, or is zoomed), nor the desktop, nor Pulo's own.
+fn covers_screen(fg: HWND) -> bool {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL};
+    unsafe {
+        if fg.0.is_null() || IsZoomed(fg).as_bool() || !IsWindowVisible(fg).as_bool() {
+            return false;
+        }
+        let mut pid = 0;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if pid == std::process::id() {
+            return false;
+        }
+        let mut class = [0u16; 32];
+        let n = GetClassNameW(fg, &mut class) as usize;
+        if matches!(String::from_utf16_lossy(&class[..n]).as_str(), "Progman" | "WorkerW") {
+            return false; // the desktop, which is screen-sized too
+        }
+        let m = MonitorFromWindow(fg, MONITOR_DEFAULTTONULL);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut r = RECT::default();
+        if m.is_invalid() || !GetMonitorInfoW(m, &mut info).as_bool() || GetWindowRect(fg, &mut r).is_err() {
+            return false;
+        }
+        let s = info.rcMonitor;
+        r.left <= s.left && r.top <= s.top && r.right >= s.right && r.bottom >= s.bottom
     }
 }
 
@@ -1029,6 +1129,7 @@ pub fn run() {
             clip::clip_image,
             tools::app_volumes,
             tools::set_app_volume,
+            set_idle,
             shots::screenshots,
             shots::screenshot_image,
             shots::open_screenshot,
@@ -1125,13 +1226,39 @@ pub fn run() {
             // Switch to ABN_FULLSCREENAPP / WM_DISPLAYCHANGE if this ever shows up in a profile.
             // Media is event-driven (sys::watch_media).
             // Also hides or tucks on any fullscreen app, even one on a different monitor.
+            // Following the mouse to another screen can't wait for the tick: check the cursor's
+            // screen 10 times a second (one cheap call) and move the moment it changes. The
+            // pill slides up out of sight first, then down on the new screen (.moving, App.tsx).
+            let fw = w.clone();
+            named("follow", move || {
+                use tauri::Emitter;
+                let mut stuck = 0isize; // a screen it couldn't land on: don't replay the slide forever
+                loop {
+                    // Against the island's own screen, not the last one seen: if anything else
+                    // moved it, there's nothing to animate.
+                    let to = cursor_monitor();
+                    if to != window_monitor(&fw) && to != stuck {
+                        MOVING.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let _ = fw.emit("moving", true);
+                        thread::sleep(Duration::from_millis(MOVE_OUT_MS));
+                        place(&fw);
+                        MOVING.store(false, std::sync::atomic::Ordering::Relaxed);
+                        let _ = fw.emit("moving", false);
+                        stuck = if window_monitor(&fw) == to { 0 } else { to };
+                    } else if to == window_monitor(&fw) {
+                        stuck = 0;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            });
             named("tick", move || {
                 let _ = sys::watch_volume(); // inits COM on this long-lived thread
                 let _ = tools::watch_mic();
                 let mut away = false;
                 let mut awake = false;
+                let mut live: (Vec<String>, Vec<String>) = Default::default();
                 loop {
-                    let (_, tuck) = fullscreen_app();
+                    let tuck = fullscreen_app();
                     if TUCKED.swap(tuck, std::sync::atomic::Ordering::Relaxed) != tuck {
                         use tauri::Emitter;
                         let _ = w.emit("tucked", tuck); // the pill slides up or down (.tucked)
@@ -1139,7 +1266,12 @@ pub fn run() {
                         apply_region(&w, w.scale_factor().unwrap_or(1.0));
                     }
                     update_visibility(&w); // fullscreen apps and the hide rules
-                    place(&w); // follows the mouse between screens; no-op when already there
+                    // Monitor and DPI changes; no-op when already there. Going to another screen
+                    // is the follow thread's, with its animation: not while one runs, nor when
+                    // the mouse is on another screen than the island.
+                    if !MOVING.load(std::sync::atomic::Ordering::Relaxed) && cursor_monitor() == window_monitor(&w) {
+                        place(&w);
+                    }
                     // Windows drops the transparency now and then (focus and display changes),
                     // which paints the margin around the pill white. Put it back within a second.
                     keep_transparent(&w);
@@ -1153,6 +1285,13 @@ pub fn run() {
                     }
                     if on("notifications") {
                         sys::poll_notifications();
+                    }
+                    // Camera and mic in use: the pill's live light.
+                    let now = if on("tools") { tools::in_use() } else { Default::default() };
+                    if now != live {
+                        use tauri::Emitter;
+                        let _ = w.emit("in_use", &now);
+                        live = now;
                     }
                     // Keep awake is held by this thread: the request lasts while it's set here.
                     let want = tools::AWAKE.load(std::sync::atomic::Ordering::Relaxed);
@@ -1177,11 +1316,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod hide_tests {
+    #[test]
+    fn no_window_is_not_full_screen() {
+        assert!(!super::covers_screen(super::HWND(std::ptr::null_mut())));
+    }
+
     /// Reads the app in front, as the hide rules and the quick menu see it. Run by hand:
     /// cargo test --lib front_app -- --ignored --nocapture
     #[test]
     #[ignore]
     fn front_app() {
+        println!("front covers its screen: {}", super::covers_screen(unsafe { super::GetForegroundWindow() }));
         let (_, path, exe) = super::front_app().expect("an app in front");
         println!("front: {exe} ({}) browser: {}", super::tools::describe(&path).unwrap_or_default(), super::BROWSERS.contains(&exe.as_str()));
         assert!(!exe.is_empty() && !exe.ends_with(".exe"));

@@ -3,6 +3,20 @@
 
 export const NOTES: [version: string, items: string[]][] = [
   [
+    "0.1.8",
+    [
+      "Update now: install an update from the island, then see what's new",
+      "Appearance: Black, Glass or Frosted, a white or green accent, and a live preview",
+      "Now: Bluetooth, dark mode, mic and keep awake a tap away",
+      "Focus: edit the Pomodoro and timer lengths right in the tab",
+      "A light while an app uses your camera or mic",
+      "Peek shows what matters now: a meeting about to start, an agent at work, a call",
+      "The island follows your mouse to another screen, with a Slide, Fade or Pop animation",
+      "Codex sessions in the Agents tab, and an option to tuck away when idle",
+      "Hides over YouTube and other full-screen browser videos",
+    ],
+  ],
+  [
     "0.1.7",
     [
       "Focus tab: switch between Pomodoro, a stopwatch and a timer",

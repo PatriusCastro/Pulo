@@ -569,3 +569,109 @@ mod mixer_tests {
         }
     }
 }
+
+const CONSENT: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\";
+
+/// A short name from a consent key: "C:#Program Files#Zoom#Zoom.exe" is Zoom,
+/// "Microsoft.WindowsCamera_8wekyb3d8bbwe" is WindowsCamera.
+fn consent_name(key: &str) -> String {
+    let n = key.rsplit('#').next().unwrap_or(key);
+    let n = n.strip_suffix(".exe").or_else(|| n.strip_suffix(".EXE")).unwrap_or(n);
+    let n = n.split('_').next().unwrap_or(n);
+    let n = n.rsplit('.').next().unwrap_or(n);
+    let mut c = n.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// Apps marked as using the device, as Windows' privacy settings record them: a key per app
+/// (NonPackaged holds the desktop apps) whose LastUsedTimeStop is 0 while in use. Desktop
+/// apps come with their program's file name (lower case), to check it still runs.
+fn using(dev: &str) -> Vec<(String, Option<String>)> {
+    fn walk(path: &str, out: &mut Vec<(String, Option<String>)>) {
+        let wide: Vec<u16> = path.encode_utf16().chain([0]).collect();
+        let mut k = HKEY::default();
+        if unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(wide.as_ptr()), Some(0), KEY_READ, &mut k) }.is_err() {
+            return;
+        }
+        let mut buf = [0u16; 512];
+        for i in 0.. {
+            let mut len = buf.len() as u32;
+            if unsafe { RegEnumKeyExW(k, i, Some(windows::core::PWSTR(buf.as_mut_ptr())), &mut len, None, None, None, None) }.is_err() {
+                break;
+            }
+            let name = String::from_utf16_lossy(&buf[..len as usize]);
+            if name == "NonPackaged" {
+                walk(&format!(r"{path}\NonPackaged"), out);
+                continue;
+            }
+            let (mut stop, mut n) = (1u64, 8u32);
+            let sub: Vec<u16> = name.encode_utf16().chain([0]).collect();
+            let ok = unsafe { RegGetValueW(k, PCWSTR(sub.as_ptr()), w!("LastUsedTimeStop"), RRF_RT_REG_QWORD, None, Some(&mut stop as *mut u64 as _), Some(&mut n)) }.is_ok();
+            if ok && stop == 0 {
+                let exe = name.contains('#').then(|| name.rsplit('#').next().unwrap_or_default().to_lowercase());
+                out.push((consent_name(&name), exe));
+            }
+        }
+        unsafe {
+            let _ = RegCloseKey(k);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&format!("{CONSENT}{dev}"), &mut out);
+    out
+}
+
+/// File names (lower case) of the programs running now.
+fn running() -> std::collections::HashSet<String> {
+    use windows::Win32::{Foundation::CloseHandle, System::Diagnostics::ToolHelp::*};
+    let mut set = std::collections::HashSet::new();
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return set };
+        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut more = Process32FirstW(snap, &mut e).is_ok();
+        while more {
+            let end = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            set.insert(String::from_utf16_lossy(&e.szExeFile[..end]).to_lowercase());
+            more = Process32NextW(snap, &mut e).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    set
+}
+
+/// (camera apps, microphone apps), Pulo's own camera mirror left out. A desktop app that
+/// quit without telling Windows (a crash) stays marked in use: it counts only while running.
+pub fn in_use() -> (Vec<String>, Vec<String>) {
+    let me = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
+    let me = consent_name(&me);
+    let (cam, mic) = (using("webcam"), using("microphone"));
+    let live = if cam.iter().chain(&mic).any(|(_, exe)| exe.is_some()) { running() } else { Default::default() };
+    let keep = |v: Vec<(String, Option<String>)>| {
+        let mut out: Vec<String> = Vec::new();
+        for (app, exe) in v {
+            if !app.eq_ignore_ascii_case(&me) && exe.is_none_or(|e| live.contains(&e)) && !out.contains(&app) {
+                out.push(app);
+            }
+        }
+        out
+    };
+    (keep(cam), keep(mic))
+}
+
+#[cfg(test)]
+mod in_use_tests {
+    use super::consent_name;
+    #[test]
+    fn names() {
+        assert_eq!(consent_name(r"C:#Program Files#Zoom#bin#Zoom.exe"), "Zoom");
+        assert_eq!(consent_name("Microsoft.WindowsCamera_8wekyb3d8bbwe"), "WindowsCamera");
+        assert_eq!(consent_name("C:#Program Files#Google#Chrome#Application#chrome.exe"), "Chrome");
+        assert_eq!(consent_name("MSTeams_8wekyb3d8bbwe"), "MSTeams");
+    }
+    // Prints what's live now. Run: cargo test in_use -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live() {
+        println!("{:?}", super::in_use());
+    }
+}
